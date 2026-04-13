@@ -36,6 +36,7 @@ import Token from './pages/Token';
 import Redemption from './pages/Redemption';
 import TopUp from './pages/TopUp';
 import Log from './pages/Log';
+import AdminUsageReport from './pages/AdminUsageReport';
 import Chat from './pages/Chat';
 import Chat2Link from './pages/Chat2Link';
 import Midjourney from './pages/Midjourney';
@@ -283,6 +284,14 @@ function App() {
             <PrivateRoute>
               <Log />
             </PrivateRoute>
+          }
+        />
+        <Route
+          path='/console/admin-usage-report'
+          element={
+            <AdminRoute>
+              <AdminUsageReport />
+            </AdminRoute>
           }
         />
         <Route

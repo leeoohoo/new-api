@@ -1,0 +1,77 @@
+===== HOST =====
+2026-03-26T15:51:38+0800
+appuser
+uid=1001(appuser) gid=1001(appuser) groups=1001(appuser)
+Linux shcxgvm039 3.10.0-1160.119.1.el7.x86_64 #1 SMP Tue Jun 4 14:43:51 UTC 2024 x86_64 x86_64 x86_64 GNU/Linux
+NAME="CentOS Linux"
+VERSION="7 (Core)"
+ID="centos"
+ID_LIKE="rhel fedora"
+VERSION_ID="7"
+PRETTY_NAME="CentOS Linux 7 (Core)"
+ANSI_COLOR="0;31"
+CPE_NAME="cpe:/o:centos:centos:7"
+HOME_URL="https://www.centos.org/"
+BUG_REPORT_URL="https://bugs.centos.org/"
+
+CENTOS_MANTISBT_PROJECT="CentOS-7"
+===== CPU / MEM =====
+4
+CPU(s):                4
+On-line CPU(s) list:   0-3
+Thread(s) per core:    1
+Core(s) per socket:    1
+Socket(s):             4
+Model name:            Intel(R) Xeon(R) Gold 5220R CPU @ 2.20GHz
+NUMA node0 CPU(s):     0-3
+              total        used        free      shared  buff/cache   available
+Mem:           7.6G        600M        5.3G         33M        1.7G        6.7G
+Swap:            0B          0B          0B
+===== DISK =====
+NAME   SIZE TYPE FSTYPE MOUNTPOINT
+sda     50G disk        
+└─sda1  50G part xfs    /
+sdb     50G disk        
+└─sdb1  50G part xfs    /app
+Filesystem     Type      Size  Used Avail Use% Mounted on
+devtmpfs       devtmpfs  3.9G     0  3.9G   0% /dev
+tmpfs          tmpfs     3.9G     0  3.9G   0% /dev/shm
+tmpfs          tmpfs     3.9G   33M  3.8G   1% /run
+tmpfs          tmpfs     3.9G     0  3.9G   0% /sys/fs/cgroup
+/dev/sda1      xfs        50G   34G   17G  68% /
+/dev/sdb1      xfs        50G  566M   50G   2% /app
+tmpfs          tmpfs     783M     0  783M   0% /run/user/1001
+tmpfs          tmpfs     783M     0  783M   0% /run/user/0
+Filesystem       Inodes  IUsed    IFree IUse% Mounted on
+devtmpfs         998435    334   998101    1% /dev
+tmpfs           1001096      1  1001095    1% /dev/shm
+tmpfs           1001096    550  1000546    1% /run
+tmpfs           1001096     16  1001080    1% /sys/fs/cgroup
+/dev/sda1      26213888 591028 25622860    3% /
+/dev/sdb1      26213888     98 26213790    1% /app
+tmpfs           1001096      1  1001095    1% /run/user/1001
+tmpfs           1001096      1  1001095    1% /run/user/0
+===== NETWORK =====
+lo               UNKNOWN        127.0.0.1/8 ::1/128 
+ens192           UP             10.184.4.227/25 fe80::5002:4a84:d698:2e78/64 
+default via 10.184.4.129 dev ens192 proto static metric 100 
+10.184.4.128/25 dev ens192 proto kernel scope link src 10.184.4.227 metric 100 
+===== PORTS (key) =====
+tcp    LISTEN     0      128       *:443                   *:*                  
+tcp    LISTEN     0      128       *:80                    *:*                  
+tcp    LISTEN     0      128       *:22                    *:*                  
+tcp    LISTEN     0      128    [::]:443                [::]:*                  
+tcp    LISTEN     0      128    [::]:22                 [::]:*                  
+===== LIMITS =====
+1024
+4096
+===== DOCKER =====
+Docker version 1.13.1, build 7d71120/1.13.1
+Docker Compose version v2.20.3
+unknown
+===== POSTGRES =====
+psql: not installed
+===== REDIS =====
+redis-server: not installed
+===== FIREWALL / SELINUX =====
+Disabled

@@ -54,6 +54,119 @@ func parseReasoningEffortFromModelSuffix(model string) (string, string) {
 	return "", model
 }
 
+func isNativeOpenAIBaseURL(baseURL string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(baseURL))
+	if normalized == "" {
+		return true
+	}
+	normalized = strings.TrimPrefix(normalized, "https://")
+	normalized = strings.TrimPrefix(normalized, "http://")
+	host := normalized
+	if idx := strings.Index(host, "/"); idx >= 0 {
+		host = host[:idx]
+	}
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return true
+	}
+	return host == "api.openai.com"
+}
+
+func collectResponsesContentTexts(content any, texts *[]string) {
+	switch value := content.(type) {
+	case string:
+		if text := strings.TrimSpace(value); text != "" {
+			*texts = append(*texts, text)
+		}
+	case []any:
+		for _, item := range value {
+			collectResponsesContentTexts(item, texts)
+		}
+	case map[string]any:
+		if text, ok := value["text"].(string); ok {
+			if normalizedText := strings.TrimSpace(text); normalizedText != "" {
+				*texts = append(*texts, normalizedText)
+			}
+		}
+		if text, ok := value["input_text"].(string); ok {
+			if normalizedText := strings.TrimSpace(text); normalizedText != "" {
+				*texts = append(*texts, normalizedText)
+			}
+		}
+		if nestedContent, ok := value["content"]; ok {
+			collectResponsesContentTexts(nestedContent, texts)
+		}
+	}
+}
+
+func normalizeResponsesSystemInputsToInstructions(request *dto.OpenAIResponsesRequest) (bool, error) {
+	if request == nil || len(request.Input) == 0 || common.GetJsonType(request.Input) != "array" {
+		return false, nil
+	}
+
+	var inputItems []any
+	if err := common.Unmarshal(request.Input, &inputItems); err != nil {
+		return false, nil
+	}
+
+	normalizedItems := make([]any, 0, len(inputItems))
+	instructionParts := make([]string, 0)
+	changed := false
+
+	for _, item := range inputItems {
+		itemMap, ok := item.(map[string]any)
+		if !ok {
+			normalizedItems = append(normalizedItems, item)
+			continue
+		}
+
+		role := strings.ToLower(strings.TrimSpace(common.Interface2String(itemMap["role"])))
+		if role != "system" && role != "developer" {
+			normalizedItems = append(normalizedItems, item)
+			continue
+		}
+
+		changed = true
+		itemTexts := make([]string, 0)
+		collectResponsesContentTexts(itemMap["content"], &itemTexts)
+		if len(itemTexts) > 0 {
+			instructionParts = append(instructionParts, strings.Join(itemTexts, "\n"))
+		}
+	}
+
+	if !changed {
+		return false, nil
+	}
+
+	if len(request.Instructions) > 0 {
+		if common.GetJsonType(request.Instructions) == "string" {
+			var existingInstructions string
+			if err := common.Unmarshal(request.Instructions, &existingInstructions); err == nil {
+				if text := strings.TrimSpace(existingInstructions); text != "" {
+					instructionParts = append([]string{text}, instructionParts...)
+				}
+			}
+		} else if text := strings.TrimSpace(string(request.Instructions)); text != "" {
+			instructionParts = append([]string{text}, instructionParts...)
+		}
+	}
+
+	if len(instructionParts) > 0 {
+		instructionsRaw, err := common.Marshal(strings.Join(instructionParts, "\n\n"))
+		if err != nil {
+			return false, err
+		}
+		request.Instructions = instructionsRaw
+	}
+
+	inputRaw, err := common.Marshal(normalizedItems)
+	if err != nil {
+		return false, err
+	}
+	request.Input = inputRaw
+	return true, nil
+}
+
 func (a *Adaptor) ConvertGeminiRequest(c *gin.Context, info *relaycommon.RelayInfo, request *dto.GeminiChatRequest) (any, error) {
 	// 使用 service.GeminiToOpenAIRequest 转换请求格式
 	openaiRequest, err := service.GeminiToOpenAIRequest(request, info)
@@ -241,6 +354,11 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 	}
 	if info.ChannelType != constant.ChannelTypeOpenAI && info.ChannelType != constant.ChannelTypeAzure {
 		request.StreamOptions = nil
+	} else if info.ChannelType == constant.ChannelTypeOpenAI &&
+		request.StreamOptions != nil &&
+		!isNativeOpenAIBaseURL(info.ChannelBaseUrl) {
+		request.StreamOptions = nil
+		logger.LogInfo(c, "openai compatibility: removed stream_options for non-native upstream")
 	}
 	if info.ChannelType == constant.ChannelTypeOpenRouter {
 		if len(request.Usage) == 0 {
@@ -595,6 +713,21 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 	}
 	if info != nil && request.Reasoning != nil && request.Reasoning.Effort != "" {
 		info.ReasoningEffort = request.Reasoning.Effort
+	}
+	if info != nil &&
+		info.ChannelType == constant.ChannelTypeOpenAI &&
+		!isNativeOpenAIBaseURL(info.ChannelBaseUrl) {
+		if request.StreamOptions != nil {
+			request.StreamOptions = nil
+			logger.LogInfo(c, "openai responses compatibility: removed stream_options for non-native upstream")
+		}
+		normalized, err := normalizeResponsesSystemInputsToInstructions(&request)
+		if err != nil {
+			return nil, err
+		}
+		if normalized {
+			logger.LogInfo(c, "openai responses compatibility: moved system/developer input messages to instructions")
+		}
 	}
 	return request, nil
 }

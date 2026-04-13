@@ -120,6 +120,82 @@ func GetLogsStat(c *gin.Context) {
 	return
 }
 
+func parseAdminUsageReportFilter(c *gin.Context) model.AdminUsageReportFilter {
+	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
+	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
+	channel, _ := strconv.Atoi(c.Query("channel"))
+	return model.AdminUsageReportFilter{
+		StartTimestamp: startTimestamp,
+		EndTimestamp:   endTimestamp,
+		ModelName:      c.Query("model_name"),
+		Channel:        channel,
+		Group:          c.Query("group"),
+	}
+}
+
+func GetAdminUsageTrend(c *gin.Context) {
+	filter := parseAdminUsageReportFilter(c)
+	bucketSeconds, _ := strconv.ParseInt(c.Query("bucket_seconds"), 10, 64)
+	if bucketSeconds <= 0 {
+		bucketSeconds = 3600
+	}
+	items, err := model.GetAdminUsageTrend(filter, bucketSeconds)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{
+		"bucket_seconds": bucketSeconds,
+		"items":          items,
+	})
+}
+
+func GetAdminUsageByModel(c *gin.Context) {
+	filter := parseAdminUsageReportFilter(c)
+	limit, _ := strconv.Atoi(c.Query("limit"))
+	items, err := model.GetAdminUsageByModel(filter, limit)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{
+		"items": items,
+	})
+}
+
+func GetAdminUsageByChannel(c *gin.Context) {
+	filter := parseAdminUsageReportFilter(c)
+	limit, _ := strconv.Atoi(c.Query("limit"))
+	items, err := model.GetAdminUsageByChannel(filter, limit)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{
+		"items": items,
+	})
+}
+
+func GetAdminUsageByUser(c *gin.Context) {
+	pageInfo := common.GetPageQuery(c)
+	query := model.AdminUsageUserQuery{
+		Filter:      parseAdminUsageReportFilter(c),
+		UserKeyword: c.Query("user_keyword"),
+		StartIdx:    pageInfo.GetStartIdx(),
+		Num:         pageInfo.GetPageSize(),
+		SortBy:      c.Query("sort_by"),
+		SortOrder:   c.Query("sort_order"),
+	}
+	items, total, err := model.GetAdminUsageByUser(query)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	pageInfo.SetTotal(int(total))
+	pageInfo.SetItems(items)
+	common.ApiSuccess(c, pageInfo)
+}
+
 func GetLogsSelfStat(c *gin.Context) {
 	username := c.GetString("username")
 	logType, _ := strconv.Atoi(c.Query("type"))

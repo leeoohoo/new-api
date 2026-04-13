@@ -22,21 +22,160 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+type miniMaxStreamCompatChoice struct {
+	Delta        dto.ChatCompletionsStreamResponseChoiceDelta `json:"delta,omitempty"`
+	Message      *dto.Message                                 `json:"message,omitempty"`
+	Logprobs     *any                                         `json:"logprobs"`
+	FinishReason *string                                      `json:"finish_reason"`
+	Index        int                                          `json:"index"`
+}
+
+type miniMaxStreamCompatResponse struct {
+	Id                string                      `json:"id"`
+	Object            string                      `json:"object"`
+	Created           int64                       `json:"created"`
+	Model             string                      `json:"model"`
+	SystemFingerprint *string                     `json:"system_fingerprint"`
+	Choices           []miniMaxStreamCompatChoice `json:"choices"`
+	Usage             *dto.Usage                  `json:"usage"`
+}
+
+type miniMaxBaseResp struct {
+	StatusCode int    `json:"status_code"`
+	StatusMsg  string `json:"status_msg"`
+}
+
+type miniMaxBusinessErrorEnvelope struct {
+	BaseResp *miniMaxBaseResp `json:"base_resp"`
+}
+
+func parseMiniMaxBusinessError(data string) *types.NewAPIError {
+	if strings.TrimSpace(data) == "" {
+		return nil
+	}
+
+	var envelope miniMaxBusinessErrorEnvelope
+	if err := common.UnmarshalJsonStr(data, &envelope); err != nil {
+		return nil
+	}
+	if envelope.BaseResp == nil || envelope.BaseResp.StatusCode == 0 {
+		return nil
+	}
+
+	message := strings.TrimSpace(envelope.BaseResp.StatusMsg)
+	if message == "" {
+		message = fmt.Sprintf("minimax upstream business error (status_code=%d)", envelope.BaseResp.StatusCode)
+	} else {
+		message = fmt.Sprintf("minimax upstream business error: %s", message)
+	}
+
+	return types.WithOpenAIError(types.OpenAIError{
+		Message: message,
+		Type:    "upstream_error",
+		Code:    envelope.BaseResp.StatusCode,
+	}, http.StatusBadRequest)
+}
+
+func normalizeMiniMaxStreamResponse(data string) (*dto.ChatCompletionsStreamResponse, error) {
+	var raw miniMaxStreamCompatResponse
+	if err := common.UnmarshalJsonStr(data, &raw); err != nil {
+		return nil, err
+	}
+
+	normalized := &dto.ChatCompletionsStreamResponse{
+		Id:                raw.Id,
+		Object:            raw.Object,
+		Created:           raw.Created,
+		Model:             raw.Model,
+		SystemFingerprint: raw.SystemFingerprint,
+		Choices:           make([]dto.ChatCompletionsStreamResponseChoice, 0, len(raw.Choices)),
+		Usage:             raw.Usage,
+	}
+
+	// MiniMax may end stream with object=chat.completion (non-chunk shape).
+	// Normalize to chat.completion.chunk for better OpenAI-stream client compatibility.
+	if normalized.Object == "chat.completion" {
+		normalized.Object = "chat.completion.chunk"
+	}
+
+	for _, choice := range raw.Choices {
+		normalizedChoice := dto.ChatCompletionsStreamResponseChoice{
+			Delta:        choice.Delta,
+			Logprobs:     choice.Logprobs,
+			FinishReason: choice.FinishReason,
+			Index:        choice.Index,
+		}
+
+		if choice.Message != nil {
+			if normalizedChoice.Delta.GetContentString() == "" {
+				content := choice.Message.StringContent()
+				if content != "" {
+					normalizedChoice.Delta.SetContentString(content)
+				}
+			}
+			if normalizedChoice.Delta.GetReasoningContent() == "" {
+				reasoning := choice.Message.ReasoningContent
+				if reasoning == "" {
+					reasoning = choice.Message.Reasoning
+				}
+				if reasoning != "" {
+					normalizedChoice.Delta.SetReasoningContent(reasoning)
+				}
+			}
+			if normalizedChoice.Delta.Role == "" {
+				normalizedChoice.Delta.Role = choice.Message.Role
+			}
+		}
+
+		// Some downstream parsers ignore content when finish_reason is present
+		// in the same chunk. Keep the content chunk readable, final completion
+		// is still indicated by trailing [DONE].
+		if normalizedChoice.FinishReason != nil && normalizedChoice.Delta.GetContentString() != "" {
+			normalizedChoice.FinishReason = nil
+		}
+
+		normalized.Choices = append(normalized.Choices, normalizedChoice)
+	}
+
+	return normalized, nil
+}
+
 func sendStreamData(c *gin.Context, info *relaycommon.RelayInfo, data string, forceFormat bool, thinkToContent bool) error {
 	if data == "" {
 		return nil
 	}
 
-	if !forceFormat && !thinkToContent {
+	needMiniMaxCompat := info.ChannelType == constant.ChannelTypeMiniMax
+	logMiniMaxChunk := func(resp *dto.ChatCompletionsStreamResponse) {
+		if !needMiniMaxCompat || resp == nil {
+			return
+		}
+		if b, err := common.Marshal(resp); err == nil {
+			logger.LogInfo(c, "minimax downstream response chunk: "+string(b))
+		} else {
+			logger.LogError(c, "failed to marshal minimax downstream response chunk: "+err.Error())
+		}
+	}
+
+	if !forceFormat && !thinkToContent && !needMiniMaxCompat {
 		return helper.StringData(c, data)
 	}
 
 	var lastStreamResponse dto.ChatCompletionsStreamResponse
-	if err := common.UnmarshalJsonStr(data, &lastStreamResponse); err != nil {
-		return err
+	if needMiniMaxCompat {
+		normalized, err := normalizeMiniMaxStreamResponse(data)
+		if err != nil {
+			return err
+		}
+		lastStreamResponse = *normalized
+	} else {
+		if err := common.UnmarshalJsonStr(data, &lastStreamResponse); err != nil {
+			return err
+		}
 	}
 
 	if !thinkToContent {
+		logMiniMaxChunk(&lastStreamResponse)
 		return helper.ObjectData(c, lastStreamResponse)
 	}
 
@@ -65,11 +204,13 @@ func sendStreamData(c *gin.Context, info *relaycommon.RelayInfo, data string, fo
 			}
 			info.ThinkingContentInfo.IsFirstThinkingContent = false
 			info.ThinkingContentInfo.HasSentThinkingContent = true
+			logMiniMaxChunk(response)
 			return helper.ObjectData(c, response)
 		}
 	}
 
 	if lastStreamResponse.Choices == nil || len(lastStreamResponse.Choices) == 0 {
+		logMiniMaxChunk(&lastStreamResponse)
 		return helper.ObjectData(c, lastStreamResponse)
 	}
 
@@ -85,6 +226,7 @@ func sendStreamData(c *gin.Context, info *relaycommon.RelayInfo, data string, fo
 				response.Choices[j].Delta.Reasoning = nil
 			}
 			info.ThinkingContentInfo.SendLastThinkingContent = true
+			logMiniMaxChunk(response)
 			helper.ObjectData(c, response)
 		}
 
@@ -100,6 +242,7 @@ func sendStreamData(c *gin.Context, info *relaycommon.RelayInfo, data string, fo
 		}
 	}
 
+	logMiniMaxChunk(&lastStreamResponse)
 	return helper.ObjectData(c, lastStreamResponse)
 }
 
@@ -110,6 +253,17 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	}
 
 	defer service.CloseResponseBodyGracefully(resp)
+
+	isMiniMax := info != nil && info.ChannelType == constant.ChannelTypeMiniMax
+	if isMiniMax {
+		logger.LogInfo(c, fmt.Sprintf(
+			"minimax upstream response meta: status=%d content_type=%q transfer_encoding=%v",
+			resp.StatusCode,
+			resp.Header.Get("Content-Type"),
+			resp.TransferEncoding,
+		))
+		logger.LogInfo(c, "minimax upstream response headers: "+fmt.Sprintf("%v", resp.Header))
+	}
 
 	model := info.UpstreamModelName
 	var responseId string
@@ -122,11 +276,19 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	var streamItems []string // store stream items
 	var lastStreamData string
 	var secondLastStreamData string // 存储倒数第二个stream data，用于音频模型
+	var minimaxUpstreamChunkCount int
+	var minimaxUpstreamChunkBytes int
 
 	// 检查是否为音频模型
 	isAudioModel := strings.Contains(strings.ToLower(model), "audio")
 
 	helper.StreamScannerHandler(c, resp, info, func(data string) bool {
+		if isMiniMax {
+			minimaxUpstreamChunkCount++
+			minimaxUpstreamChunkBytes += len(data)
+			logger.LogInfo(c, "minimax upstream response data chunk: "+data)
+		}
+
 		if lastStreamData != "" {
 			err := HandleStreamFormat(c, info, lastStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent)
 			if err != nil {
@@ -144,6 +306,23 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 		}
 		return true
 	})
+
+	if isMiniMax {
+		if minimaxUpstreamChunkCount == 0 {
+			logger.LogError(c, "minimax upstream response contains no data chunks")
+		} else {
+			logger.LogInfo(c, fmt.Sprintf(
+				"minimax upstream response chunk summary: count=%d bytes=%d",
+				minimaxUpstreamChunkCount,
+				minimaxUpstreamChunkBytes,
+			))
+		}
+
+		if businessErr := parseMiniMaxBusinessError(lastStreamData); businessErr != nil {
+			logger.LogError(c, "minimax upstream business error detected: "+businessErr.Error())
+			return nil, businessErr
+		}
+	}
 
 	// 对音频模型，从倒数第二个stream data中提取usage信息
 	if isAudioModel && secondLastStreamData != "" {
@@ -293,6 +472,10 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 			return nil, types.NewError(err, types.ErrorCodeBadResponseBody)
 		}
 		responseBody = geminiRespStr
+	}
+
+	if info.ChannelType == constant.ChannelTypeMiniMax {
+		logger.LogInfo(c, "minimax downstream response body: "+string(responseBody))
 	}
 
 	service.IOCopyBytesGracefully(c, resp, responseBody)

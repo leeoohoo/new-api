@@ -47,6 +47,7 @@ const routerMap = {
   task: '/console/task',
   models: '/console/models',
   deployment: '/console/deployment',
+  usage_report: '/console/admin-usage-report',
   playground: '/console/playground',
   personal: '/console/personal',
 };
@@ -181,6 +182,12 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         text: t('用户管理'),
         itemKey: 'user',
         to: '/user',
+        className: isAdmin() ? '' : 'tableHiddle',
+      },
+      {
+        text: t('全局用量报表'),
+        itemKey: 'usage_report',
+        to: '/admin-usage-report',
         className: isAdmin() ? '' : 'tableHiddle',
       },
       {

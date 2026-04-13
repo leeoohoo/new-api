@@ -1,0 +1,91 @@
+.admin-usage-report {
+  width: 100%;
+  min-width: 0;
+  padding: 4px 0 16px;
+}
+
+.admin-usage-report__stack {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.admin-usage-report__gap-sm {
+  gap: 12px;
+}
+
+.admin-usage-report .semi-card {
+  width: 100%;
+  min-width: 0;
+}
+
+.admin-usage-report .semi-card-header,
+.admin-usage-report .semi-card-body {
+  width: 100%;
+  min-width: 0;
+  padding: 16px !important;
+}
+
+.admin-usage-report .semi-card-body {
+  overflow: visible;
+}
+
+.admin-usage-report__filter-card {
+  position: sticky;
+  top: 8px;
+  z-index: 30;
+  border: 1px solid var(--semi-color-border);
+}
+
+@supports (backdrop-filter: blur(8px)) {
+  .admin-usage-report__filter-card {
+    backdrop-filter: blur(8px);
+    background-color: color-mix(
+      in srgb,
+      var(--semi-color-bg-1) 88%,
+      transparent 12%
+    );
+  }
+}
+
+.admin-usage-report__inline-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--semi-color-border);
+  background: var(--semi-color-fill-0);
+}
+
+.admin-usage-report__chart-box {
+  width: 100%;
+  min-width: 0;
+}
+
+.admin-usage-report__chart-box > div {
+  width: 100% !important;
+  height: 100% !important;
+  min-width: 0;
+}
+
+.admin-usage-report__chart-box canvas {
+  width: 100% !important;
+}
+
+.admin-usage-report .semi-table-wrapper,
+.admin-usage-report .semi-table-container {
+  width: 100%;
+}
+
+@media (max-width: 767px) {
+  .admin-usage-report {
+    padding: 0 0 12px;
+  }
+
+  .admin-usage-report__filter-card {
+    top: 4px;
+  }
+}

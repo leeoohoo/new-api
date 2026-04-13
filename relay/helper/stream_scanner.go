@@ -60,6 +60,7 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 
 	generalSettings := operation_setting.GetGeneralSetting()
 	pingEnabled := generalSettings.PingIntervalEnabled && !info.DisablePing
+	isMiniMaxStream := info != nil && info.ChannelType == constant.ChannelTypeMiniMax
 	pingInterval := time.Duration(generalSettings.PingIntervalSeconds) * time.Second
 	if pingInterval <= 0 {
 		pingInterval = DefaultPingInterval
@@ -225,38 +226,61 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 			}
 
 			ticker.Reset(streamingTimeout)
-			data := scanner.Text()
+			rawLine := scanner.Text()
 			if common.DebugEnabled {
-				println(data)
+				println(rawLine)
+			}
+			if isMiniMaxStream {
+				logger.LogInfo(c, "minimax upstream response raw line: "+rawLine)
 			}
 
-			if len(data) < 6 {
+			line := strings.TrimSpace(rawLine)
+			if line == "" {
 				continue
 			}
-			if data[:5] != "data:" && data[:6] != "[DONE]" {
-				continue
-			}
-			data = data[5:]
-			data = strings.TrimSpace(data)
-			if data == "" {
-				continue
-			}
-			if !strings.HasPrefix(data, "[DONE]") {
-				info.SetFirstResponseTime()
-				info.ReceivedResponseCount++
 
-				select {
-				case dataChan <- data:
-				case <-ctx.Done():
-					return
-				case <-stopChan:
-					return
-				}
-			} else {
-				// done, 处理完成标志，直接退出停止读取剩余数据防止出错
+			if strings.HasPrefix(line, "[DONE]") ||
+				strings.HasPrefix(line, "data:[DONE]") ||
+				strings.HasPrefix(line, "data: [DONE]") {
 				if common.DebugEnabled {
 					println("received [DONE], stopping scanner")
 				}
+				return
+			}
+
+			var payload string
+			switch {
+			case strings.HasPrefix(line, "data:"):
+				payload = strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+			case isMiniMaxStream && strings.HasPrefix(line, "{"):
+				// MiniMax occasionally returns newline-delimited JSON without SSE "data:" prefix.
+				payload = line
+				logger.LogInfo(c, "minimax upstream response non-sse json line detected, treating as stream payload")
+			default:
+				if isMiniMaxStream {
+					logger.LogInfo(c, "minimax upstream response line ignored (non-data): "+line)
+				}
+				continue
+			}
+
+			if payload == "" {
+				continue
+			}
+			if strings.HasPrefix(payload, "[DONE]") {
+				if common.DebugEnabled {
+					println("received [DONE], stopping scanner")
+				}
+				return
+			}
+
+			info.SetFirstResponseTime()
+			info.ReceivedResponseCount++
+
+			select {
+			case dataChan <- payload:
+			case <-ctx.Done():
+				return
+			case <-stopChan:
 				return
 			}
 		}

@@ -170,9 +170,16 @@ func handleLastResponse(lastStreamData string, responseId *string, createAt *int
 	systemFingerprint *string, model *string, usage **dto.Usage,
 	containStreamUsage *bool, info *relaycommon.RelayInfo,
 	shouldSendLastResp *bool) error {
+	trimmedLastStreamData := strings.TrimSpace(lastStreamData)
+	if trimmedLastStreamData == "" || strings.EqualFold(trimmedLastStreamData, "[DONE]") {
+		// Some providers may end stream without a final JSON chunk.
+		// Treat this as a normal termination and avoid JSON unmarshal error noise.
+		*shouldSendLastResp = false
+		return nil
+	}
 
 	var lastStreamResponse dto.ChatCompletionsStreamResponse
-	if err := common.Unmarshal(common.StringToByteSlice(lastStreamData), &lastStreamResponse); err != nil {
+	if err := common.Unmarshal(common.StringToByteSlice(trimmedLastStreamData), &lastStreamResponse); err != nil {
 		return err
 	}
 

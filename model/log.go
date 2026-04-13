@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -377,6 +378,356 @@ type Stat struct {
 	Quota int `json:"quota"`
 	Rpm   int `json:"rpm"`
 	Tpm   int `json:"tpm"`
+}
+
+type AdminUsageReportFilter struct {
+	StartTimestamp int64
+	EndTimestamp   int64
+	ModelName      string
+	Channel        int
+	Group          string
+}
+
+type AdminUsageTrendItem struct {
+	Timestamp    int64   `json:"timestamp" gorm:"column:timestamp"`
+	RequestCount int64   `json:"request_count" gorm:"column:request_count"`
+	SuccessCount int64   `json:"success_count" gorm:"column:success_count"`
+	ErrorCount   int64   `json:"error_count" gorm:"column:error_count"`
+	Quota        int64   `json:"quota" gorm:"column:quota"`
+	TokenUsed    int64   `json:"token_used" gorm:"column:token_used"`
+	SuccessRate  float64 `json:"success_rate" gorm:"-"`
+	ErrorRate    float64 `json:"error_rate" gorm:"-"`
+}
+
+type AdminUsageModelItem struct {
+	ModelName    string  `json:"model_name" gorm:"column:model_name"`
+	RequestCount int64   `json:"request_count" gorm:"column:request_count"`
+	SuccessCount int64   `json:"success_count" gorm:"column:success_count"`
+	ErrorCount   int64   `json:"error_count" gorm:"column:error_count"`
+	Quota        int64   `json:"quota" gorm:"column:quota"`
+	TokenUsed    int64   `json:"token_used" gorm:"column:token_used"`
+	SuccessRate  float64 `json:"success_rate" gorm:"-"`
+	ErrorRate    float64 `json:"error_rate" gorm:"-"`
+}
+
+type AdminUsageChannelItem struct {
+	ChannelId    int     `json:"channel_id" gorm:"column:channel_id"`
+	ChannelName  string  `json:"channel_name" gorm:"-"`
+	RequestCount int64   `json:"request_count" gorm:"column:request_count"`
+	SuccessCount int64   `json:"success_count" gorm:"column:success_count"`
+	ErrorCount   int64   `json:"error_count" gorm:"column:error_count"`
+	Quota        int64   `json:"quota" gorm:"column:quota"`
+	TokenUsed    int64   `json:"token_used" gorm:"column:token_used"`
+	SuccessRate  float64 `json:"success_rate" gorm:"-"`
+	ErrorRate    float64 `json:"error_rate" gorm:"-"`
+}
+
+type AdminUsageUserItem struct {
+	UserId       int     `json:"user_id" gorm:"column:user_id"`
+	Username     string  `json:"username" gorm:"column:username"`
+	RequestCount int64   `json:"request_count" gorm:"column:request_count"`
+	SuccessCount int64   `json:"success_count" gorm:"column:success_count"`
+	ErrorCount   int64   `json:"error_count" gorm:"column:error_count"`
+	Quota        int64   `json:"quota" gorm:"column:quota"`
+	TokenUsed    int64   `json:"token_used" gorm:"column:token_used"`
+	SuccessRate  float64 `json:"success_rate" gorm:"-"`
+	ErrorRate    float64 `json:"error_rate" gorm:"-"`
+}
+
+type AdminUsageUserQuery struct {
+	Filter     AdminUsageReportFilter
+	UserKeyword string
+	StartIdx   int
+	Num        int
+	SortBy     string
+	SortOrder  string
+}
+
+func buildAdminUsageReportBaseQuery(filter AdminUsageReportFilter) (*gorm.DB, error) {
+	tx := LOG_DB.Model(&Log{}).Where("logs.type IN ?", []int{LogTypeConsume, LogTypeError})
+	if filter.StartTimestamp != 0 {
+		tx = tx.Where("logs.created_at >= ?", filter.StartTimestamp)
+	}
+	if filter.EndTimestamp != 0 {
+		tx = tx.Where("logs.created_at <= ?", filter.EndTimestamp)
+	}
+	if filter.ModelName != "" {
+		modelNamePattern, err := sanitizeLikePattern(filter.ModelName)
+		if err != nil {
+			return nil, err
+		}
+		tx = tx.Where("logs.model_name LIKE ? ESCAPE '!'", modelNamePattern)
+	}
+	if filter.Channel != 0 {
+		tx = tx.Where("logs.channel_id = ?", filter.Channel)
+	}
+	if filter.Group != "" {
+		tx = tx.Where("logs."+logGroupCol+" = ?", filter.Group)
+	}
+	return tx, nil
+}
+
+func calcUsageRates(requestCount int64, successCount int64, errorCount int64) (float64, float64) {
+	if requestCount <= 0 {
+		return 0, 0
+	}
+	base := float64(requestCount)
+	return float64(successCount) * 100 / base, float64(errorCount) * 100 / base
+}
+
+func GetAdminUsageTrend(filter AdminUsageReportFilter, bucketSeconds int64) (items []*AdminUsageTrendItem, err error) {
+	if bucketSeconds <= 0 {
+		return nil, errors.New("无效的时间粒度")
+	}
+	tx, err := buildAdminUsageReportBaseQuery(filter)
+	if err != nil {
+		return nil, err
+	}
+
+	type trendRaw struct {
+		CreatedAt        int64 `gorm:"column:created_at"`
+		Type             int   `gorm:"column:type"`
+		Quota            int   `gorm:"column:quota"`
+		PromptTokens     int   `gorm:"column:prompt_tokens"`
+		CompletionTokens int   `gorm:"column:completion_tokens"`
+	}
+
+	var rows []*trendRaw
+	err = tx.Select("logs.created_at, logs.type, logs.quota, logs.prompt_tokens, logs.completion_tokens").Order("logs.created_at asc").Find(&rows).Error
+	if err != nil {
+		common.SysError("failed to query usage trend: " + err.Error())
+		return nil, errors.New("查询使用趋势失败")
+	}
+
+	if filter.StartTimestamp == 0 || filter.EndTimestamp == 0 || filter.EndTimestamp < filter.StartTimestamp {
+		return make([]*AdminUsageTrendItem, 0), nil
+	}
+
+	alignedStart := filter.StartTimestamp - filter.StartTimestamp%bucketSeconds
+	alignedEnd := filter.EndTimestamp - filter.EndTimestamp%bucketSeconds
+	if alignedEnd < alignedStart {
+		alignedEnd = alignedStart
+	}
+
+	bucketMap := make(map[int64]*AdminUsageTrendItem, len(rows))
+	for _, row := range rows {
+		bucketStart := row.CreatedAt - row.CreatedAt%bucketSeconds
+		item, ok := bucketMap[bucketStart]
+		if !ok {
+			item = &AdminUsageTrendItem{Timestamp: bucketStart}
+			bucketMap[bucketStart] = item
+		}
+		item.RequestCount++
+		if row.Type == LogTypeConsume {
+			item.SuccessCount++
+		} else if row.Type == LogTypeError {
+			item.ErrorCount++
+		}
+		item.Quota += int64(row.Quota)
+		item.TokenUsed += int64(row.PromptTokens + row.CompletionTokens)
+	}
+
+	capacity := int((alignedEnd-alignedStart)/bucketSeconds) + 1
+	items = make([]*AdminUsageTrendItem, 0, capacity)
+	for ts := alignedStart; ts <= alignedEnd; ts += bucketSeconds {
+		item, ok := bucketMap[ts]
+		if !ok {
+			item = &AdminUsageTrendItem{Timestamp: ts}
+		}
+		item.SuccessRate, item.ErrorRate = calcUsageRates(item.RequestCount, item.SuccessCount, item.ErrorCount)
+		items = append(items, item)
+	}
+
+	return items, nil
+}
+
+func GetAdminUsageByModel(filter AdminUsageReportFilter, limit int) (items []*AdminUsageModelItem, err error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 200 {
+		limit = 200
+	}
+
+	tx, err := buildAdminUsageReportBaseQuery(filter)
+	if err != nil {
+		return nil, err
+	}
+
+	err = tx.Select(
+		"logs.model_name as model_name, count(*) as request_count, "+
+			"sum(case when logs.type = ? then 1 else 0 end) as success_count, "+
+			"sum(case when logs.type = ? then 1 else 0 end) as error_count, "+
+			"coalesce(sum(logs.quota), 0) as quota, "+
+			"coalesce(sum(logs.prompt_tokens + logs.completion_tokens), 0) as token_used",
+		LogTypeConsume, LogTypeError,
+	).Group("logs.model_name").Order("request_count desc").Limit(limit).Scan(&items).Error
+	if err != nil {
+		common.SysError("failed to query usage by model: " + err.Error())
+		return nil, errors.New("查询模型维度统计失败")
+	}
+
+	for _, item := range items {
+		item.SuccessRate, item.ErrorRate = calcUsageRates(item.RequestCount, item.SuccessCount, item.ErrorCount)
+	}
+	return items, nil
+}
+
+func fillUsageChannelNames(items []*AdminUsageChannelItem) error {
+	if len(items) == 0 {
+		return nil
+	}
+
+	channelIds := make([]int, 0, len(items))
+	seen := make(map[int]struct{}, len(items))
+	for _, item := range items {
+		if item.ChannelId <= 0 {
+			continue
+		}
+		if _, ok := seen[item.ChannelId]; ok {
+			continue
+		}
+		seen[item.ChannelId] = struct{}{}
+		channelIds = append(channelIds, item.ChannelId)
+	}
+	if len(channelIds) == 0 {
+		return nil
+	}
+
+	var channels []struct {
+		Id   int    `gorm:"column:id"`
+		Name string `gorm:"column:name"`
+	}
+	if err := DB.Table("channels").Select("id, name").Where("id IN ?", channelIds).Find(&channels).Error; err != nil {
+		common.SysError("failed to query channels for usage report: " + err.Error())
+		return errors.New("查询渠道信息失败")
+	}
+
+	channelMap := make(map[int]string, len(channels))
+	for _, channel := range channels {
+		channelMap[channel.Id] = channel.Name
+	}
+	for i := range items {
+		items[i].ChannelName = channelMap[items[i].ChannelId]
+	}
+	return nil
+}
+
+func GetAdminUsageByChannel(filter AdminUsageReportFilter, limit int) (items []*AdminUsageChannelItem, err error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 200 {
+		limit = 200
+	}
+
+	tx, err := buildAdminUsageReportBaseQuery(filter)
+	if err != nil {
+		return nil, err
+	}
+
+	err = tx.Select(
+		"logs.channel_id as channel_id, count(*) as request_count, "+
+			"sum(case when logs.type = ? then 1 else 0 end) as success_count, "+
+			"sum(case when logs.type = ? then 1 else 0 end) as error_count, "+
+			"coalesce(sum(logs.quota), 0) as quota, "+
+			"coalesce(sum(logs.prompt_tokens + logs.completion_tokens), 0) as token_used",
+		LogTypeConsume, LogTypeError,
+	).Group("logs.channel_id").Order("request_count desc").Limit(limit).Scan(&items).Error
+	if err != nil {
+		common.SysError("failed to query usage by channel: " + err.Error())
+		return nil, errors.New("查询渠道维度统计失败")
+	}
+
+	if err = fillUsageChannelNames(items); err != nil {
+		return nil, err
+	}
+	for _, item := range items {
+		item.SuccessRate, item.ErrorRate = calcUsageRates(item.RequestCount, item.SuccessCount, item.ErrorCount)
+	}
+	return items, nil
+}
+
+func normalizeUsageSortOrder(sortOrder string) string {
+	if strings.EqualFold(strings.TrimSpace(sortOrder), "asc") {
+		return "asc"
+	}
+	return "desc"
+}
+
+func getAdminUsageUserSortField(sortBy string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(sortBy)) {
+	case "", "request_count":
+		return "request_count", true
+	case "quota":
+		return "quota", true
+	case "token_used":
+		return "token_used", true
+	case "success_count":
+		return "success_count", true
+	case "error_count":
+		return "error_count", true
+	case "user_id":
+		return "logs.user_id", true
+	case "username":
+		return "logs.username", true
+	default:
+		return "", false
+	}
+}
+
+func GetAdminUsageByUser(query AdminUsageUserQuery) (items []*AdminUsageUserItem, total int64, err error) {
+	sortField, ok := getAdminUsageUserSortField(query.SortBy)
+	if !ok {
+		return nil, 0, errors.New("不支持的排序字段")
+	}
+	if query.StartIdx < 0 {
+		query.StartIdx = 0
+	}
+	if query.Num <= 0 {
+		query.Num = common.ItemsPerPage
+	}
+	if query.Num > 100 {
+		query.Num = 100
+	}
+
+	tx, err := buildAdminUsageReportBaseQuery(query.Filter)
+	if err != nil {
+		return nil, 0, err
+	}
+	if query.UserKeyword != "" {
+		userPattern, err := sanitizeLikePattern(query.UserKeyword)
+		if err != nil {
+			return nil, 0, err
+		}
+		tx = tx.Where("logs.username LIKE ? ESCAPE '!'", userPattern)
+	}
+
+	countTx := tx.Session(&gorm.Session{}).Select("logs.user_id, logs.username").Group("logs.user_id, logs.username")
+	err = LOG_DB.Table("(?) as usage_user_groups", countTx).Count(&total).Error
+	if err != nil {
+		common.SysError("failed to count usage users: " + err.Error())
+		return nil, 0, errors.New("查询用户维度统计失败")
+	}
+
+	orderClause := sortField + " " + normalizeUsageSortOrder(query.SortOrder)
+	err = tx.Session(&gorm.Session{}).Select(
+		"logs.user_id as user_id, logs.username as username, count(*) as request_count, "+
+			"sum(case when logs.type = ? then 1 else 0 end) as success_count, "+
+			"sum(case when logs.type = ? then 1 else 0 end) as error_count, "+
+			"coalesce(sum(logs.quota), 0) as quota, "+
+			"coalesce(sum(logs.prompt_tokens + logs.completion_tokens), 0) as token_used",
+		LogTypeConsume, LogTypeError,
+	).Group("logs.user_id, logs.username").Order(orderClause).Limit(query.Num).Offset(query.StartIdx).Scan(&items).Error
+	if err != nil {
+		common.SysError("failed to query usage users: " + err.Error())
+		return nil, 0, errors.New("查询用户维度统计失败")
+	}
+
+	for _, item := range items {
+		item.SuccessRate, item.ErrorRate = calcUsageRates(item.RequestCount, item.SuccessCount, item.ErrorCount)
+	}
+	return items, total, nil
 }
 
 func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, channel int, group string) (stat Stat, err error) {

@@ -1,0 +1,4782 @@
+diff --git a/ADMIN_USAGE_REPORT_V2_BLUEPRINT.md b/ADMIN_USAGE_REPORT_V2_BLUEPRINT.md
+new file mode 100644
+index 00000000..08e51fa0
+--- /dev/null
++++ b/ADMIN_USAGE_REPORT_V2_BLUEPRINT.md
+@@ -0,0 +1,293 @@
++# Admin 全维度用量报表方案（V2 Blueprint）
++
++## 1. 背景与目标
++
++当前 `/console/admin-usage-report` 页面已具备基础能力，但信息密度和分析深度不足，主要问题：
++
++1. 只有单一模型柱状图 + 用户表，缺少“时间趋势”和“多维联动”。
++2. 无法直接回答核心管理问题：  
++   - 整体 Token 使用趋势是否异常？  
++   - 哪些模型增长最快？  
++   - 哪些渠道错误率高？  
++   - 用量集中在哪些用户/分组？
++3. 缺少下钻链路（总览 -> 维度 -> 明细），不利于定位问题。
++
++V2 目标：构建一个“可运营、可诊断、可追踪”的全方位管理报表页。
++
++
++## 2. 基于现有代码的数据能力盘点
++
++## 2.1 现有数据源
++
++1. `logs`（明细主数据）
++- 字段已具备：`created_at`, `type`, `model_name`, `channel_id`, `user_id`, `username`, `quota`, `prompt_tokens`, `completion_tokens`, `use_time`, `group`, `request_id`。
++- 当前 `type` 已覆盖消费与错误（`LogTypeConsume`, `LogTypeError`），可直接计算成功率/错误率。
++
++2. `quota_data`（小时级聚合）
++- 现有聚合维度：`user_id + username + model_name + created_at(小时桶)`。
++- 指标：`count`, `quota`, `token_used`。
++- 由 `RecordConsumeLog` 在 `DataExportEnabled` 时异步写入缓存并落库。
++
++## 2.2 现有接口
++
++1. `GET /api/log/stat`  
++- 指标：`quota`, `rpm`, `tpm`（`rpm/tpm`为最近60秒窗口）。
++
++2. `GET /api/log/usage_report/trend`  
++- 指标：`request_count`, `success_count`, `error_count`, `quota`, `token_used`（按 bucket）。
++
++3. `GET /api/log/usage_report/model`
++4. `GET /api/log/usage_report/channel`
++5. `GET /api/log/usage_report/user`
++
++6. `GET /api/data`（基于 `quota_data`）
++- 返回模型+小时桶聚合数据（`model_name`, `count`, `quota`, `token_used`, `created_at`）。
++
++## 2.3 数据能力结论
++
++现有数据足够支撑 V2 的核心目标（整体趋势、模型趋势、渠道/用户分布、明细下钻）。  
++建议仅补充少量接口，用于降低前端拼装复杂度和数据库压力。
++
++
++## 3. 页面信息架构（全维度）
++
++## 3.1 顶部全局筛选区（固定吸顶）
++
++统一参数（一次筛选，全页面联动）：
++
++1. 时间范围：最近24h / 7d / 30d / 自定义。
++2. 粒度：`5m / 1h / 1d`（按范围自动推荐）。
++3. 模型（多选，支持搜索）。
++4. 渠道（多选）。
++5. 分组 `group`（单选/多选）。
++6. 用户关键字（用户名模糊搜索）。
++7. 对比开关：环比上一个同长度时间段。
++8. 操作按钮：查询、重置、导出。
++
++## 3.2 模块 A：总览 KPI（第一屏）
++
++建议卡片：
++
++1. 总请求数
++2. 成功请求数
++3. 错误请求数
++4. 成功率
++5. 总 Token 用量
++6. 总配额消耗（quota）
++7. 近60秒 RPM
++8. 近60秒 TPM
++9. 活跃模型数（窗口内有调用）
++10. 活跃用户数（窗口内有调用）
++
++## 3.3 模块 B：整体趋势（你最关心的 Token 趋势）
++
++1. 图表 1：整体 Token 使用趋势（主折线/面积图）
++- X：时间桶
++- Y：`token_used`
++- 支持对比上周期（虚线）
++- 支持鼠标框选区间后下钻
++
++2. 图表 2：请求与错误趋势（双轴）
++- 柱：`request_count`
++- 线：`error_rate` 或 `error_count`
++
++3. 图表 3：配额消耗趋势
++- 显示 `quota` 的时间变化，便于对账与预算追踪
++
++## 3.4 模块 C：模型分析（模型趋势是核心）
++
++1. 图表 4：各模型 Token 使用趋势（Top N 模型）
++- 形态：堆叠面积 + 图例开关
++- 指标：`token_used`
++- 默认 Top 10，支持切换排序口径（按 token/request/quota）
++
++2. 图表 5：各模型请求趋势（Top N）
++- 形态：多折线
++- 指标：`request_count`
++
++3. 图表 6：模型占比（Treemap 或环图）
++- 指标切换：Token / 请求 / 配额
++
++4. 表格：模型表现榜
++- 列：模型名、请求数、Token、Quota、成功率、错误率、环比增幅
++- 点击模型 -> 全页面自动下钻该模型
++
++## 3.5 模块 D：渠道分析
++
++1. 渠道对比条形图：请求、Token、错误率。
++2. 渠道趋势图：选中渠道后展示时间趋势。
++3. 渠道质量表：渠道名、成功率、错误率、平均耗时（可选）。
++
++## 3.6 模块 E：用户分析
++
++1. 用户分布图（Top N）：
++- 指标切换：请求 / Token / Quota。
++
++2. 用户明细表：
++- 列：用户ID、用户名、请求数、Token、Quota、成功率、错误率。
++- 支持分页、排序、关键字搜索。
++
++## 3.7 模块 F：明细与审计
++
++1. 明细日志表（复用 `/api/log/`）：
++- 时间、用户、模型、渠道、Token、Quota、状态、request_id。
++2. 与上方筛选联动。
++3. 支持导出 CSV（当前筛选结果）。
++
++
++## 4. 接口方案（在现有基础上最小增量）
++
++## 4.1 现有接口继续保留
++
++1. `/api/log/usage_report/trend`
++2. `/api/log/usage_report/model`
++3. `/api/log/usage_report/channel`
++4. `/api/log/usage_report/user`
++5. `/api/log/stat`
++6. `/api/data`
++
++## 4.2 建议新增接口（降低前端拼装和请求数）
++
++1. `GET /api/log/usage_report/overview`
++- 返回 KPI 一次性聚合：
++```json
++{
++  "success": true,
++  "data": {
++    "request_count": 0,
++    "success_count": 0,
++    "error_count": 0,
++    "success_rate": 0,
++    "error_rate": 0,
++    "token_used": 0,
++    "quota": 0,
++    "active_model_count": 0,
++    "active_user_count": 0,
++    "rpm": 0,
++    "tpm": 0
++  }
++}
++```
++
++2. `GET /api/log/usage_report/model_trend`
++- 维度：`model_name + bucket`
++- 用于“各模型时间趋势图”。
++
++3. `GET /api/log/usage_report/channel_trend`
++- 维度：`channel_id + bucket`
++- 用于渠道趋势。
++
++4. （可选）`GET /api/log/usage_report/export`
++- 返回 CSV 文件流或下载地址。
++
++## 4.3 统一查询参数建议
++
++1. `start_timestamp`, `end_timestamp`
++2. `bucket_seconds`
++3. `model_name`（支持多值，逗号分隔）
++4. `channel`（支持多值）
++5. `group`
++6. `user_keyword`
++7. `top_n`
++8. `compare`（`none|previous_period`）
++
++
++## 5. 数据计算口径（统一规则）
++
++1. 请求数：`logs.type IN (consume, error)`。
++2. 成功数：`logs.type = consume`。
++3. 错误数：`logs.type = error`。
++4. 成功率：`success_count / request_count`。
++5. Token 用量：`sum(prompt_tokens + completion_tokens)`。
++6. 配额消耗：`sum(quota)`。
++7. 活跃模型数：窗口内去重模型数。
++8. 活跃用户数：窗口内去重用户数。
++9. RPM/TPM：最近60秒窗口（复用现有逻辑）。
++
++
++## 6. 性能与跨库兼容策略（SQLite / MySQL / PostgreSQL）
++
++## 6.1 查询分层策略
++
++1. 近7天优先走 `logs`，保证实时和精细。
++2. 大时间窗（如30天/90天）优先走 `quota_data` 聚合（小时级），必要时回退 `logs`。
++3. 对 `model_trend/channel_trend` 增加 `top_n` 限制，避免图表爆量。
++
++## 6.2 跨数据库约束
++
++1. 优先 GORM 聚合，避免方言函数。
++2. 时间分桶沿用应用层 bucket 计算（避免 `date_trunc`/`from_unixtime` 方言差异）。
++3. 保留字与布尔条件沿用项目已有兼容写法（`logGroupCol`、兼容常量）。
++
++## 6.3 缓存建议
++
++1. 对总览和趋势接口增加 10~30 秒短 TTL 缓存。
++2. 缓存 key 包含完整筛选参数，避免脏读。
++
++
++## 7. 前端实现方案（页面结构）
++
++建议将页面拆成可维护模块：
++
++1. `AdminUsageReportPage`（容器 + 全局筛选状态）
++2. `UsageOverviewCards`（KPI）
++3. `UsageTrendPanel`（整体趋势）
++4. `ModelTrendPanel`（模型趋势与榜单）
++5. `ChannelPanel`（渠道分析）
++6. `UserPanel`（用户分布与明细）
++7. `UsageDetailTable`（明细与导出）
++
++交互关键点：
++
++1. 图表点击即下钻（模型/渠道/用户）。
++2. 图例开关即筛选（不额外刷新可先前端过滤）。
++3. 时间框选回填筛选区，并触发全局刷新。
++4. 所有模块共享同一 QueryState，避免状态分裂。
++
++
++## 8. 分阶段落地计划
++
++## Phase 1（快速升级，1~2 天）
++
++1. 新增“总览 KPI + 整体 Token 趋势 + 请求/错误趋势”。
++2. 接入现有 `/usage_report/trend` 与 `/log/stat`。
++3. 保留现有模型图和用户表，增强视觉与筛选联动。
++
++## Phase 2（核心增强，2~4 天）
++
++1. 新增 `model_trend` 接口。
++2. 完成“各模型使用趋势（TopN）+ 模型榜单 + 占比图”。
++3. 支持周期对比（环比）。
++
++## Phase 3（运营化，2~3 天）
++
++1. 渠道趋势 + 渠道质量分析。
++2. 明细导出能力。
++3. 异常提示（错误率突增、Token 峰值告警）。
++
++
++## 9. 验收标准（面向业务）
++
++1. 可以直接看到“整体 Token 趋势图”并按时间/模型/渠道筛选。
++2. 可以直接看到“各模型时间趋势图”并支持 TopN 和下钻。
++3. KPI 与图表口径一致（同筛选条件下可互相校验）。
++4. 30 天范围查询在可接受时间内返回（建议 < 3s，具体看数据量）。
++5. SQLite / MySQL / PostgreSQL 三库行为一致。
++
++
++## 10. 你可以先看的最终页面骨架（建议）
++
++```text
++筛选区（时间/模型/渠道/分组/用户/粒度/对比）
++  └─ KPI 卡片行（请求、成功率、Token、Quota、RPM/TPM、活跃数）
++      └─ 整体趋势区（Token趋势、请求&错误趋势、Quota趋势）
++          └─ 模型分析区（模型趋势TopN、模型占比、模型榜单）
++              └─ 渠道分析区（渠道对比、渠道趋势、渠道质量）
++                  └─ 用户分析区（用户分布、用户明细）
++                      └─ 明细审计区（日志明细 + 导出）
++```
++
++
++---
++
++如果你认可这个方向，下一步我可以直接把 `Phase 1` 的页面改造拆成具体开发任务清单（后端接口、前端组件、联调与验收项），并按你希望的视觉风格给一个更“数据中台化”的 UI 草图说明。
+diff --git a/controller/log.go b/controller/log.go
+index cf3825f1..01329a38 100644
+--- a/controller/log.go
++++ b/controller/log.go
+@@ -120,6 +120,82 @@ func GetLogsStat(c *gin.Context) {
+ 	return
+ }
+ 
++func parseAdminUsageReportFilter(c *gin.Context) model.AdminUsageReportFilter {
++	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
++	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
++	channel, _ := strconv.Atoi(c.Query("channel"))
++	return model.AdminUsageReportFilter{
++		StartTimestamp: startTimestamp,
++		EndTimestamp:   endTimestamp,
++		ModelName:      c.Query("model_name"),
++		Channel:        channel,
++		Group:          c.Query("group"),
++	}
++}
++
++func GetAdminUsageTrend(c *gin.Context) {
++	filter := parseAdminUsageReportFilter(c)
++	bucketSeconds, _ := strconv.ParseInt(c.Query("bucket_seconds"), 10, 64)
++	if bucketSeconds <= 0 {
++		bucketSeconds = 3600
++	}
++	items, err := model.GetAdminUsageTrend(filter, bucketSeconds)
++	if err != nil {
++		common.ApiError(c, err)
++		return
++	}
++	common.ApiSuccess(c, gin.H{
++		"bucket_seconds": bucketSeconds,
++		"items":          items,
++	})
++}
++
++func GetAdminUsageByModel(c *gin.Context) {
++	filter := parseAdminUsageReportFilter(c)
++	limit, _ := strconv.Atoi(c.Query("limit"))
++	items, err := model.GetAdminUsageByModel(filter, limit)
++	if err != nil {
++		common.ApiError(c, err)
++		return
++	}
++	common.ApiSuccess(c, gin.H{
++		"items": items,
++	})
++}
++
++func GetAdminUsageByChannel(c *gin.Context) {
++	filter := parseAdminUsageReportFilter(c)
++	limit, _ := strconv.Atoi(c.Query("limit"))
++	items, err := model.GetAdminUsageByChannel(filter, limit)
++	if err != nil {
++		common.ApiError(c, err)
++		return
++	}
++	common.ApiSuccess(c, gin.H{
++		"items": items,
++	})
++}
++
++func GetAdminUsageByUser(c *gin.Context) {
++	pageInfo := common.GetPageQuery(c)
++	query := model.AdminUsageUserQuery{
++		Filter:      parseAdminUsageReportFilter(c),
++		UserKeyword: c.Query("user_keyword"),
++		StartIdx:    pageInfo.GetStartIdx(),
++		Num:         pageInfo.GetPageSize(),
++		SortBy:      c.Query("sort_by"),
++		SortOrder:   c.Query("sort_order"),
++	}
++	items, total, err := model.GetAdminUsageByUser(query)
++	if err != nil {
++		common.ApiError(c, err)
++		return
++	}
++	pageInfo.SetTotal(int(total))
++	pageInfo.SetItems(items)
++	common.ApiSuccess(c, pageInfo)
++}
++
+ func GetLogsSelfStat(c *gin.Context) {
+ 	username := c.GetString("username")
+ 	logType, _ := strconv.Atoi(c.Query("type"))
+diff --git a/docker-compose.yml b/docker-compose.yml
+index 3c56faf3..5c15d799 100644
+--- a/docker-compose.yml
++++ b/docker-compose.yml
+@@ -16,7 +16,10 @@ version: '3.4' # For compatibility with older Docker versions
+ 
+ services:
+   new-api:
+-    image: calciumion/new-api:latest
++    build:
++      context: .
++      dockerfile: Dockerfile
++    image: new-api:local
+     container_name: new-api
+     restart: always
+     command: --log-dir /app/logs
+diff --git a/install_newapi_env.sh b/install_newapi_env.sh
+new file mode 100644
+index 00000000..fd7e8163
+--- /dev/null
++++ b/install_newapi_env.sh
+@@ -0,0 +1,193 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++APP_USER="${APP_USER:-appuser}"
++APP_DIR="${APP_DIR:-/app/new-api}"
++APP_PORT="${APP_PORT:-3000}"
++
++DB_NAME="${DB_NAME:-new_api}"
++DB_USER="${DB_USER:-newapi}"
++DB_PASS="${DB_PASS:-}"
++REDIS_PASS="${REDIS_PASS:-}"
++
++YUM_BASE_OPTS=(-y --disablerepo=pgdg12\* --disablerepo=pgdg13\*)
++
++log() {
++  echo "[$(date +'%F %T')] $*"
++}
++
++die() {
++  echo "ERROR: $*" >&2
++  exit 1
++}
++
++yum_install() {
++  yum "${YUM_BASE_OPTS[@]}" install "$@"
++}
++
++detect_redis_service() {
++  if systemctl list-unit-files --type=service | awk '{print $1}' | grep -qx 'redis.service'; then
++    echo "redis.service"
++    return 0
++  fi
++  if systemctl list-unit-files --type=service | awk '{print $1}' | grep -qx 'redis-server.service'; then
++    echo "redis-server.service"
++    return 0
++  fi
++  return 1
++}
++
++if [[ $EUID -ne 0 ]]; then
++  die "Please run with sudo/root."
++fi
++
++if [[ -z "$DB_PASS" ]]; then
++  die "DB_PASS is required, for example: sudo DB_PASS='StrongPass123' ./install_newapi_env.sh"
++fi
++
++if [[ ! "$DB_USER" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
++  die "DB_USER must match ^[A-Za-z_][A-Za-z0-9_]*$"
++fi
++
++if [[ ! "$DB_NAME" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
++  die "DB_NAME must match ^[A-Za-z_][A-Za-z0-9_]*$"
++fi
++
++if [[ ! "$DB_PASS" =~ ^[A-Za-z0-9._~-]+$ ]]; then
++  die "DB_PASS contains unsafe chars for DSN. Use only letters, numbers, dot, underscore, hyphen, tilde."
++fi
++
++log "[1/7] Install base tools"
++yum_install epel-release
++yum_install yum-utils curl wget git tar unzip openssl
++
++yum-config-manager --disable 'pgdg12*' 'pgdg13*' >/dev/null 2>&1 || true
++
++log "[2/7] Install PostgreSQL 14, Redis, Nginx"
++yum_install https://download.postgresql.org/pub/repos/yum/reporpms/EL-7-x86_64/pgdg-redhat-repo-latest.noarch.rpm || true
++yum-config-manager --disable 'pgdg12*' 'pgdg13*' >/dev/null 2>&1 || true
++yum-config-manager --enable 'pgdg14' >/dev/null 2>&1 || true
++
++yum "${YUM_BASE_OPTS[@]}" --enablerepo=pgdg14 install postgresql14-server postgresql14
++
++if ! rpm -q redis >/dev/null 2>&1; then
++  if ! yum "${YUM_BASE_OPTS[@]}" --enablerepo=epel install redis; then
++    yum_install https://rpms.remirepo.net/enterprise/remi-release-7.rpm || true
++    yum "${YUM_BASE_OPTS[@]}" --enablerepo=remi install redis || die "Failed to install redis from epel/remi"
++  fi
++fi
++
++if ! rpm -q nginx >/dev/null 2>&1; then
++  yum "${YUM_BASE_OPTS[@]}" --enablerepo=epel install nginx || yum_install nginx
++fi
++
++log "[3/7] Init and start services"
++if [[ ! -f /var/lib/pgsql/14/data/PG_VERSION ]]; then
++  /usr/pgsql-14/bin/postgresql-14-setup initdb
++fi
++systemctl enable postgresql-14.service
++systemctl start postgresql-14.service
++
++REDIS_SERVICE="$(detect_redis_service || true)"
++if [[ -z "$REDIS_SERVICE" ]]; then
++  systemctl list-unit-files | grep -i redis || true
++  die "Redis service unit not found"
++fi
++systemctl enable "$REDIS_SERVICE"
++systemctl start "$REDIS_SERVICE"
++
++systemctl enable nginx.service || true
++if ! systemctl start nginx.service; then
++  log "WARN: nginx start failed (likely 80/443 in use). Continue."
++fi
++
++log "[4/7] Create DB/user"
++PSQL_BIN="$(command -v psql || true)"
++if [[ -z "$PSQL_BIN" && -x /usr/pgsql-14/bin/psql ]]; then
++  PSQL_BIN="/usr/pgsql-14/bin/psql"
++fi
++[[ -n "$PSQL_BIN" ]] || die "psql not found"
++
++# Avoid runuser warning when current working directory is not accessible to postgres.
++cd /
++DB_PASS_SQL=${DB_PASS//\'/\'\'}
++runuser -u postgres -- "$PSQL_BIN" -tAc "SELECT 1 FROM pg_roles WHERE rolname='${DB_USER}'" | grep -q 1 || \
++  runuser -u postgres -- "$PSQL_BIN" -c "CREATE USER \"${DB_USER}\" WITH PASSWORD '${DB_PASS_SQL}';"
++runuser -u postgres -- "$PSQL_BIN" -tAc "SELECT 1 FROM pg_database WHERE datname='${DB_NAME}'" | grep -q 1 || \
++  runuser -u postgres -- "$PSQL_BIN" -c "CREATE DATABASE \"${DB_NAME}\" OWNER \"${DB_USER}\";"
++
++log "[5/7] Harden Redis (localhost only)"
++REDIS_CONF=""
++if [[ -f /etc/redis.conf ]]; then
++  REDIS_CONF=/etc/redis.conf
++elif [[ -f /etc/redis/redis.conf ]]; then
++  REDIS_CONF=/etc/redis/redis.conf
++fi
++
++if [[ -n "$REDIS_CONF" ]]; then
++  sed -ri 's/^#?[[:space:]]*bind[[:space:]].*/bind 127.0.0.1 ::1/' "$REDIS_CONF"
++  sed -ri 's/^#?[[:space:]]*protected-mode[[:space:]].*/protected-mode yes/' "$REDIS_CONF"
++  if [[ -n "$REDIS_PASS" ]]; then
++    sed -ri '/^#?[[:space:]]*requirepass[[:space:]]+/d' "$REDIS_CONF"
++    printf '\nrequirepass %s\n' "$REDIS_PASS" >> "$REDIS_CONF"
++  fi
++  systemctl restart "$REDIS_SERVICE"
++fi
++
++log "[6/7] Create app dir and .env"
++id "$APP_USER" >/dev/null 2>&1 || useradd -m -s /sbin/nologin "$APP_USER" || useradd -m "$APP_USER"
++install -d -o "$APP_USER" -g "$APP_USER" -m 755 "$APP_DIR" "$APP_DIR/logs"
++
++SESSION_SECRET="$(openssl rand -hex 32)"
++CRYPTO_SECRET="$(openssl rand -hex 32)"
++if [[ -n "$REDIS_PASS" ]]; then
++  REDIS_CONN="redis://:${REDIS_PASS}@127.0.0.1:6379/0"
++else
++  REDIS_CONN="redis://127.0.0.1:6379/0"
++fi
++
++cat > "${APP_DIR}/.env" <<EOF
++PORT=${APP_PORT}
++SQL_DSN=postgresql://${DB_USER}:${DB_PASS}@127.0.0.1:5432/${DB_NAME}?sslmode=disable
++REDIS_CONN_STRING=${REDIS_CONN}
++SESSION_SECRET=${SESSION_SECRET}
++CRYPTO_SECRET=${CRYPTO_SECRET}
++TZ=Asia/Shanghai
++ERROR_LOG_ENABLED=true
++BATCH_UPDATE_ENABLED=true
++EOF
++
++chown "$APP_USER:$APP_USER" "${APP_DIR}/.env"
++chmod 600 "${APP_DIR}/.env"
++
++log "[7/7] Write systemd service"
++cat > /etc/systemd/system/new-api.service <<EOF
++[Unit]
++Description=new-api service
++After=network.target postgresql-14.service ${REDIS_SERVICE}
++Wants=postgresql-14.service ${REDIS_SERVICE}
++
++[Service]
++User=${APP_USER}
++WorkingDirectory=${APP_DIR}
++EnvironmentFile=${APP_DIR}/.env
++ExecStart=${APP_DIR}/new-api --port ${APP_PORT} --log-dir ${APP_DIR}/logs
++Restart=always
++RestartSec=5
++LimitNOFILE=65535
++
++[Install]
++WantedBy=multi-user.target
++EOF
++
++systemctl daemon-reload
++systemctl enable new-api
++
++echo
++echo "Done: base environment installed."
++echo "Next:"
++echo "  1) Put binary at ${APP_DIR}/new-api"
++echo "  2) chmod +x ${APP_DIR}/new-api"
++echo "  3) systemctl start new-api"
++echo "  4) systemctl status new-api --no-pager -l | sed -n '1,40p'"
++echo "  5) curl -s http://127.0.0.1:${APP_PORT}/api/status"
+diff --git a/model/log.go b/model/log.go
+index 2d4782fa..2cd730b7 100644
+--- a/model/log.go
++++ b/model/log.go
+@@ -4,6 +4,7 @@ import (
+ 	"context"
+ 	"errors"
+ 	"fmt"
++	"strings"
+ 	"time"
+ 
+ 	"github.com/QuantumNous/new-api/common"
+@@ -379,6 +380,356 @@ type Stat struct {
+ 	Tpm   int `json:"tpm"`
+ }
+ 
++type AdminUsageReportFilter struct {
++	StartTimestamp int64
++	EndTimestamp   int64
++	ModelName      string
++	Channel        int
++	Group          string
++}
++
++type AdminUsageTrendItem struct {
++	Timestamp    int64   `json:"timestamp" gorm:"column:timestamp"`
++	RequestCount int64   `json:"request_count" gorm:"column:request_count"`
++	SuccessCount int64   `json:"success_count" gorm:"column:success_count"`
++	ErrorCount   int64   `json:"error_count" gorm:"column:error_count"`
++	Quota        int64   `json:"quota" gorm:"column:quota"`
++	TokenUsed    int64   `json:"token_used" gorm:"column:token_used"`
++	SuccessRate  float64 `json:"success_rate" gorm:"-"`
++	ErrorRate    float64 `json:"error_rate" gorm:"-"`
++}
++
++type AdminUsageModelItem struct {
++	ModelName    string  `json:"model_name" gorm:"column:model_name"`
++	RequestCount int64   `json:"request_count" gorm:"column:request_count"`
++	SuccessCount int64   `json:"success_count" gorm:"column:success_count"`
++	ErrorCount   int64   `json:"error_count" gorm:"column:error_count"`
++	Quota        int64   `json:"quota" gorm:"column:quota"`
++	TokenUsed    int64   `json:"token_used" gorm:"column:token_used"`
++	SuccessRate  float64 `json:"success_rate" gorm:"-"`
++	ErrorRate    float64 `json:"error_rate" gorm:"-"`
++}
++
++type AdminUsageChannelItem struct {
++	ChannelId    int     `json:"channel_id" gorm:"column:channel_id"`
++	ChannelName  string  `json:"channel_name" gorm:"-"`
++	RequestCount int64   `json:"request_count" gorm:"column:request_count"`
++	SuccessCount int64   `json:"success_count" gorm:"column:success_count"`
++	ErrorCount   int64   `json:"error_count" gorm:"column:error_count"`
++	Quota        int64   `json:"quota" gorm:"column:quota"`
++	TokenUsed    int64   `json:"token_used" gorm:"column:token_used"`
++	SuccessRate  float64 `json:"success_rate" gorm:"-"`
++	ErrorRate    float64 `json:"error_rate" gorm:"-"`
++}
++
++type AdminUsageUserItem struct {
++	UserId       int     `json:"user_id" gorm:"column:user_id"`
++	Username     string  `json:"username" gorm:"column:username"`
++	RequestCount int64   `json:"request_count" gorm:"column:request_count"`
++	SuccessCount int64   `json:"success_count" gorm:"column:success_count"`
++	ErrorCount   int64   `json:"error_count" gorm:"column:error_count"`
++	Quota        int64   `json:"quota" gorm:"column:quota"`
++	TokenUsed    int64   `json:"token_used" gorm:"column:token_used"`
++	SuccessRate  float64 `json:"success_rate" gorm:"-"`
++	ErrorRate    float64 `json:"error_rate" gorm:"-"`
++}
++
++type AdminUsageUserQuery struct {
++	Filter     AdminUsageReportFilter
++	UserKeyword string
++	StartIdx   int
++	Num        int
++	SortBy     string
++	SortOrder  string
++}
++
++func buildAdminUsageReportBaseQuery(filter AdminUsageReportFilter) (*gorm.DB, error) {
++	tx := LOG_DB.Model(&Log{}).Where("logs.type IN ?", []int{LogTypeConsume, LogTypeError})
++	if filter.StartTimestamp != 0 {
++		tx = tx.Where("logs.created_at >= ?", filter.StartTimestamp)
++	}
++	if filter.EndTimestamp != 0 {
++		tx = tx.Where("logs.created_at <= ?", filter.EndTimestamp)
++	}
++	if filter.ModelName != "" {
++		modelNamePattern, err := sanitizeLikePattern(filter.ModelName)
++		if err != nil {
++			return nil, err
++		}
++		tx = tx.Where("logs.model_name LIKE ? ESCAPE '!'", modelNamePattern)
++	}
++	if filter.Channel != 0 {
++		tx = tx.Where("logs.channel_id = ?", filter.Channel)
++	}
++	if filter.Group != "" {
++		tx = tx.Where("logs."+logGroupCol+" = ?", filter.Group)
++	}
++	return tx, nil
++}
++
++func calcUsageRates(requestCount int64, successCount int64, errorCount int64) (float64, float64) {
++	if requestCount <= 0 {
++		return 0, 0
++	}
++	base := float64(requestCount)
++	return float64(successCount) * 100 / base, float64(errorCount) * 100 / base
++}
++
++func GetAdminUsageTrend(filter AdminUsageReportFilter, bucketSeconds int64) (items []*AdminUsageTrendItem, err error) {
++	if bucketSeconds <= 0 {
++		return nil, errors.New("无效的时间粒度")
++	}
++	tx, err := buildAdminUsageReportBaseQuery(filter)
++	if err != nil {
++		return nil, err
++	}
++
++	type trendRaw struct {
++		CreatedAt        int64 `gorm:"column:created_at"`
++		Type             int   `gorm:"column:type"`
++		Quota            int   `gorm:"column:quota"`
++		PromptTokens     int   `gorm:"column:prompt_tokens"`
++		CompletionTokens int   `gorm:"column:completion_tokens"`
++	}
++
++	var rows []*trendRaw
++	err = tx.Select("logs.created_at, logs.type, logs.quota, logs.prompt_tokens, logs.completion_tokens").Order("logs.created_at asc").Find(&rows).Error
++	if err != nil {
++		common.SysError("failed to query usage trend: " + err.Error())
++		return nil, errors.New("查询使用趋势失败")
++	}
++
++	if filter.StartTimestamp == 0 || filter.EndTimestamp == 0 || filter.EndTimestamp < filter.StartTimestamp {
++		return make([]*AdminUsageTrendItem, 0), nil
++	}
++
++	alignedStart := filter.StartTimestamp - filter.StartTimestamp%bucketSeconds
++	alignedEnd := filter.EndTimestamp - filter.EndTimestamp%bucketSeconds
++	if alignedEnd < alignedStart {
++		alignedEnd = alignedStart
++	}
++
++	bucketMap := make(map[int64]*AdminUsageTrendItem, len(rows))
++	for _, row := range rows {
++		bucketStart := row.CreatedAt - row.CreatedAt%bucketSeconds
++		item, ok := bucketMap[bucketStart]
++		if !ok {
++			item = &AdminUsageTrendItem{Timestamp: bucketStart}
++			bucketMap[bucketStart] = item
++		}
++		item.RequestCount++
++		if row.Type == LogTypeConsume {
++			item.SuccessCount++
++		} else if row.Type == LogTypeError {
++			item.ErrorCount++
++		}
++		item.Quota += int64(row.Quota)
++		item.TokenUsed += int64(row.PromptTokens + row.CompletionTokens)
++	}
++
++	capacity := int((alignedEnd-alignedStart)/bucketSeconds) + 1
++	items = make([]*AdminUsageTrendItem, 0, capacity)
++	for ts := alignedStart; ts <= alignedEnd; ts += bucketSeconds {
++		item, ok := bucketMap[ts]
++		if !ok {
++			item = &AdminUsageTrendItem{Timestamp: ts}
++		}
++		item.SuccessRate, item.ErrorRate = calcUsageRates(item.RequestCount, item.SuccessCount, item.ErrorCount)
++		items = append(items, item)
++	}
++
++	return items, nil
++}
++
++func GetAdminUsageByModel(filter AdminUsageReportFilter, limit int) (items []*AdminUsageModelItem, err error) {
++	if limit <= 0 {
++		limit = 20
++	}
++	if limit > 200 {
++		limit = 200
++	}
++
++	tx, err := buildAdminUsageReportBaseQuery(filter)
++	if err != nil {
++		return nil, err
++	}
++
++	err = tx.Select(
++		"logs.model_name as model_name, count(*) as request_count, "+
++			"sum(case when logs.type = ? then 1 else 0 end) as success_count, "+
++			"sum(case when logs.type = ? then 1 else 0 end) as error_count, "+
++			"coalesce(sum(logs.quota), 0) as quota, "+
++			"coalesce(sum(logs.prompt_tokens + logs.completion_tokens), 0) as token_used",
++		LogTypeConsume, LogTypeError,
++	).Group("logs.model_name").Order("request_count desc").Limit(limit).Scan(&items).Error
++	if err != nil {
++		common.SysError("failed to query usage by model: " + err.Error())
++		return nil, errors.New("查询模型维度统计失败")
++	}
++
++	for _, item := range items {
++		item.SuccessRate, item.ErrorRate = calcUsageRates(item.RequestCount, item.SuccessCount, item.ErrorCount)
++	}
++	return items, nil
++}
++
++func fillUsageChannelNames(items []*AdminUsageChannelItem) error {
++	if len(items) == 0 {
++		return nil
++	}
++
++	channelIds := make([]int, 0, len(items))
++	seen := make(map[int]struct{}, len(items))
++	for _, item := range items {
++		if item.ChannelId <= 0 {
++			continue
++		}
++		if _, ok := seen[item.ChannelId]; ok {
++			continue
++		}
++		seen[item.ChannelId] = struct{}{}
++		channelIds = append(channelIds, item.ChannelId)
++	}
++	if len(channelIds) == 0 {
++		return nil
++	}
++
++	var channels []struct {
++		Id   int    `gorm:"column:id"`
++		Name string `gorm:"column:name"`
++	}
++	if err := DB.Table("channels").Select("id, name").Where("id IN ?", channelIds).Find(&channels).Error; err != nil {
++		common.SysError("failed to query channels for usage report: " + err.Error())
++		return errors.New("查询渠道信息失败")
++	}
++
++	channelMap := make(map[int]string, len(channels))
++	for _, channel := range channels {
++		channelMap[channel.Id] = channel.Name
++	}
++	for i := range items {
++		items[i].ChannelName = channelMap[items[i].ChannelId]
++	}
++	return nil
++}
++
++func GetAdminUsageByChannel(filter AdminUsageReportFilter, limit int) (items []*AdminUsageChannelItem, err error) {
++	if limit <= 0 {
++		limit = 20
++	}
++	if limit > 200 {
++		limit = 200
++	}
++
++	tx, err := buildAdminUsageReportBaseQuery(filter)
++	if err != nil {
++		return nil, err
++	}
++
++	err = tx.Select(
++		"logs.channel_id as channel_id, count(*) as request_count, "+
++			"sum(case when logs.type = ? then 1 else 0 end) as success_count, "+
++			"sum(case when logs.type = ? then 1 else 0 end) as error_count, "+
++			"coalesce(sum(logs.quota), 0) as quota, "+
++			"coalesce(sum(logs.prompt_tokens + logs.completion_tokens), 0) as token_used",
++		LogTypeConsume, LogTypeError,
++	).Group("logs.channel_id").Order("request_count desc").Limit(limit).Scan(&items).Error
++	if err != nil {
++		common.SysError("failed to query usage by channel: " + err.Error())
++		return nil, errors.New("查询渠道维度统计失败")
++	}
++
++	if err = fillUsageChannelNames(items); err != nil {
++		return nil, err
++	}
++	for _, item := range items {
++		item.SuccessRate, item.ErrorRate = calcUsageRates(item.RequestCount, item.SuccessCount, item.ErrorCount)
++	}
++	return items, nil
++}
++
++func normalizeUsageSortOrder(sortOrder string) string {
++	if strings.EqualFold(strings.TrimSpace(sortOrder), "asc") {
++		return "asc"
++	}
++	return "desc"
++}
++
++func getAdminUsageUserSortField(sortBy string) (string, bool) {
++	switch strings.ToLower(strings.TrimSpace(sortBy)) {
++	case "", "request_count":
++		return "request_count", true
++	case "quota":
++		return "quota", true
++	case "token_used":
++		return "token_used", true
++	case "success_count":
++		return "success_count", true
++	case "error_count":
++		return "error_count", true
++	case "user_id":
++		return "logs.user_id", true
++	case "username":
++		return "logs.username", true
++	default:
++		return "", false
++	}
++}
++
++func GetAdminUsageByUser(query AdminUsageUserQuery) (items []*AdminUsageUserItem, total int64, err error) {
++	sortField, ok := getAdminUsageUserSortField(query.SortBy)
++	if !ok {
++		return nil, 0, errors.New("不支持的排序字段")
++	}
++	if query.StartIdx < 0 {
++		query.StartIdx = 0
++	}
++	if query.Num <= 0 {
++		query.Num = common.ItemsPerPage
++	}
++	if query.Num > 100 {
++		query.Num = 100
++	}
++
++	tx, err := buildAdminUsageReportBaseQuery(query.Filter)
++	if err != nil {
++		return nil, 0, err
++	}
++	if query.UserKeyword != "" {
++		userPattern, err := sanitizeLikePattern(query.UserKeyword)
++		if err != nil {
++			return nil, 0, err
++		}
++		tx = tx.Where("logs.username LIKE ? ESCAPE '!'", userPattern)
++	}
++
++	countTx := tx.Session(&gorm.Session{}).Select("logs.user_id, logs.username").Group("logs.user_id, logs.username")
++	err = LOG_DB.Table("(?) as usage_user_groups", countTx).Count(&total).Error
++	if err != nil {
++		common.SysError("failed to count usage users: " + err.Error())
++		return nil, 0, errors.New("查询用户维度统计失败")
++	}
++
++	orderClause := sortField + " " + normalizeUsageSortOrder(query.SortOrder)
++	err = tx.Session(&gorm.Session{}).Select(
++		"logs.user_id as user_id, logs.username as username, count(*) as request_count, "+
++			"sum(case when logs.type = ? then 1 else 0 end) as success_count, "+
++			"sum(case when logs.type = ? then 1 else 0 end) as error_count, "+
++			"coalesce(sum(logs.quota), 0) as quota, "+
++			"coalesce(sum(logs.prompt_tokens + logs.completion_tokens), 0) as token_used",
++		LogTypeConsume, LogTypeError,
++	).Group("logs.user_id, logs.username").Order(orderClause).Limit(query.Num).Offset(query.StartIdx).Scan(&items).Error
++	if err != nil {
++		common.SysError("failed to query usage users: " + err.Error())
++		return nil, 0, errors.New("查询用户维度统计失败")
++	}
++
++	for _, item := range items {
++		item.SuccessRate, item.ErrorRate = calcUsageRates(item.RequestCount, item.SuccessCount, item.ErrorCount)
++	}
++	return items, total, nil
++}
++
+ func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, channel int, group string) (stat Stat, err error) {
+ 	tx := LOG_DB.Table("logs").Select("sum(quota) quota")
+ 
+diff --git a/newapi-check.txt b/newapi-check.txt
+new file mode 100644
+index 00000000..bcc43fa3
+--- /dev/null
++++ b/newapi-check.txt
+@@ -0,0 +1,77 @@
++===== HOST =====
++2026-03-26T15:51:38+0800
++appuser
++uid=1001(appuser) gid=1001(appuser) groups=1001(appuser)
++Linux shcxgvm039 3.10.0-1160.119.1.el7.x86_64 #1 SMP Tue Jun 4 14:43:51 UTC 2024 x86_64 x86_64 x86_64 GNU/Linux
++NAME="CentOS Linux"
++VERSION="7 (Core)"
++ID="centos"
++ID_LIKE="rhel fedora"
++VERSION_ID="7"
++PRETTY_NAME="CentOS Linux 7 (Core)"
++ANSI_COLOR="0;31"
++CPE_NAME="cpe:/o:centos:centos:7"
++HOME_URL="https://www.centos.org/"
++BUG_REPORT_URL="https://bugs.centos.org/"
++
++CENTOS_MANTISBT_PROJECT="CentOS-7"
++===== CPU / MEM =====
++4
++CPU(s):                4
++On-line CPU(s) list:   0-3
++Thread(s) per core:    1
++Core(s) per socket:    1
++Socket(s):             4
++Model name:            Intel(R) Xeon(R) Gold 5220R CPU @ 2.20GHz
++NUMA node0 CPU(s):     0-3
++              total        used        free      shared  buff/cache   available
++Mem:           7.6G        600M        5.3G         33M        1.7G        6.7G
++Swap:            0B          0B          0B
++===== DISK =====
++NAME   SIZE TYPE FSTYPE MOUNTPOINT
++sda     50G disk        
++└─sda1  50G part xfs    /
++sdb     50G disk        
++└─sdb1  50G part xfs    /app
++Filesystem     Type      Size  Used Avail Use% Mounted on
++devtmpfs       devtmpfs  3.9G     0  3.9G   0% /dev
++tmpfs          tmpfs     3.9G     0  3.9G   0% /dev/shm
++tmpfs          tmpfs     3.9G   33M  3.8G   1% /run
++tmpfs          tmpfs     3.9G     0  3.9G   0% /sys/fs/cgroup
++/dev/sda1      xfs        50G   34G   17G  68% /
++/dev/sdb1      xfs        50G  566M   50G   2% /app
++tmpfs          tmpfs     783M     0  783M   0% /run/user/1001
++tmpfs          tmpfs     783M     0  783M   0% /run/user/0
++Filesystem       Inodes  IUsed    IFree IUse% Mounted on
++devtmpfs         998435    334   998101    1% /dev
++tmpfs           1001096      1  1001095    1% /dev/shm
++tmpfs           1001096    550  1000546    1% /run
++tmpfs           1001096     16  1001080    1% /sys/fs/cgroup
++/dev/sda1      26213888 591028 25622860    3% /
++/dev/sdb1      26213888     98 26213790    1% /app
++tmpfs           1001096      1  1001095    1% /run/user/1001
++tmpfs           1001096      1  1001095    1% /run/user/0
++===== NETWORK =====
++lo               UNKNOWN        127.0.0.1/8 ::1/128 
++ens192           UP             10.184.4.227/25 fe80::5002:4a84:d698:2e78/64 
++default via 10.184.4.129 dev ens192 proto static metric 100 
++10.184.4.128/25 dev ens192 proto kernel scope link src 10.184.4.227 metric 100 
++===== PORTS (key) =====
++tcp    LISTEN     0      128       *:443                   *:*                  
++tcp    LISTEN     0      128       *:80                    *:*                  
++tcp    LISTEN     0      128       *:22                    *:*                  
++tcp    LISTEN     0      128    [::]:443                [::]:*                  
++tcp    LISTEN     0      128    [::]:22                 [::]:*                  
++===== LIMITS =====
++1024
++4096
++===== DOCKER =====
++Docker version 1.13.1, build 7d71120/1.13.1
++Docker Compose version v2.20.3
++unknown
++===== POSTGRES =====
++psql: not installed
++===== REDIS =====
++redis-server: not installed
++===== FIREWALL / SELINUX =====
++Disabled
+diff --git a/relay/channel/codex/adaptor.go b/relay/channel/codex/adaptor.go
+index ef4d4fa0..5ecf3654 100644
+--- a/relay/channel/codex/adaptor.go
++++ b/relay/channel/codex/adaptor.go
+@@ -41,7 +41,8 @@ func (a *Adaptor) Init(info *relaycommon.RelayInfo) {
+ }
+ 
+ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayInfo, request *dto.GeneralOpenAIRequest) (any, error) {
+-	return nil, errors.New("codex channel: /v1/chat/completions endpoint not supported")
++	// Support chat/completions by forwarding to gateway
++	return request, nil
+ }
+ 
+ func (a *Adaptor) ConvertRerankRequest(c *gin.Context, relayMode int, request dto.RerankRequest) (any, error) {
+@@ -112,18 +113,23 @@ func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, request
+ }
+ 
+ func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (usage any, err *types.NewAPIError) {
+-	if info.RelayMode != relayconstant.RelayModeResponses && info.RelayMode != relayconstant.RelayModeResponsesCompact {
+-		return nil, types.NewError(errors.New("codex channel: endpoint not supported"), types.ErrorCodeInvalidRequest)
+-	}
+-
+-	if info.RelayMode == relayconstant.RelayModeResponsesCompact {
++	switch info.RelayMode {
++	case relayconstant.RelayModeResponsesCompact:
+ 		return openai.OaiResponsesCompactionHandler(c, resp)
++	case relayconstant.RelayModeResponses:
++		if info.IsStream {
++			return openai.OaiResponsesStreamHandler(c, info, resp)
++		}
++		return openai.OaiResponsesHandler(c, info, resp)
++	case relayconstant.RelayModeChatCompletions:
++		// Use standard OpenAI chat completions handlers
++		if info.IsStream {
++			return openai.OaiStreamHandler(c, info, resp)
++		}
++		return openai.OpenaiHandler(c, info, resp)
++	default:
++		return nil, types.NewError(errors.New("codex channel: endpoint not supported"), types.ErrorCodeInvalidRequest)
+ 	}
+-
+-	if info.IsStream {
+-		return openai.OaiResponsesStreamHandler(c, info, resp)
+-	}
+-	return openai.OaiResponsesHandler(c, info, resp)
+ }
+ 
+ func (a *Adaptor) GetModelList() []string {
+@@ -135,12 +141,16 @@ func (a *Adaptor) GetChannelName() string {
+ }
+ 
+ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
+-	if info.RelayMode != relayconstant.RelayModeResponses && info.RelayMode != relayconstant.RelayModeResponsesCompact {
+-		return "", errors.New("codex channel: only /v1/responses and /v1/responses/compact are supported")
+-	}
+-	path := "/backend-api/codex/responses"
+-	if info.RelayMode == relayconstant.RelayModeResponsesCompact {
++	var path string
++	switch info.RelayMode {
++	case relayconstant.RelayModeResponses:
++		path = "/backend-api/codex/responses"
++	case relayconstant.RelayModeResponsesCompact:
+ 		path = "/backend-api/codex/responses/compact"
++	case relayconstant.RelayModeChatCompletions:
++		path = "/v1/chat/completions"
++	default:
++		return "", errors.New("codex channel: only /v1/responses, /v1/responses/compact and /v1/chat/completions are supported")
+ 	}
+ 	return relaycommon.GetFullRequestURL(info.ChannelBaseUrl, path, info.ChannelType), nil
+ }
+diff --git a/relay/channel/openai/adaptor.go b/relay/channel/openai/adaptor.go
+index 29a8f349..3cd61421 100644
+--- a/relay/channel/openai/adaptor.go
++++ b/relay/channel/openai/adaptor.go
+@@ -54,6 +54,119 @@ func parseReasoningEffortFromModelSuffix(model string) (string, string) {
+ 	return "", model
+ }
+ 
++func isNativeOpenAIBaseURL(baseURL string) bool {
++	normalized := strings.ToLower(strings.TrimSpace(baseURL))
++	if normalized == "" {
++		return true
++	}
++	normalized = strings.TrimPrefix(normalized, "https://")
++	normalized = strings.TrimPrefix(normalized, "http://")
++	host := normalized
++	if idx := strings.Index(host, "/"); idx >= 0 {
++		host = host[:idx]
++	}
++	host = strings.TrimSpace(host)
++	if host == "" {
++		return true
++	}
++	return host == "api.openai.com"
++}
++
++func collectResponsesContentTexts(content any, texts *[]string) {
++	switch value := content.(type) {
++	case string:
++		if text := strings.TrimSpace(value); text != "" {
++			*texts = append(*texts, text)
++		}
++	case []any:
++		for _, item := range value {
++			collectResponsesContentTexts(item, texts)
++		}
++	case map[string]any:
++		if text, ok := value["text"].(string); ok {
++			if normalizedText := strings.TrimSpace(text); normalizedText != "" {
++				*texts = append(*texts, normalizedText)
++			}
++		}
++		if text, ok := value["input_text"].(string); ok {
++			if normalizedText := strings.TrimSpace(text); normalizedText != "" {
++				*texts = append(*texts, normalizedText)
++			}
++		}
++		if nestedContent, ok := value["content"]; ok {
++			collectResponsesContentTexts(nestedContent, texts)
++		}
++	}
++}
++
++func normalizeResponsesSystemInputsToInstructions(request *dto.OpenAIResponsesRequest) (bool, error) {
++	if request == nil || len(request.Input) == 0 || common.GetJsonType(request.Input) != "array" {
++		return false, nil
++	}
++
++	var inputItems []any
++	if err := common.Unmarshal(request.Input, &inputItems); err != nil {
++		return false, nil
++	}
++
++	normalizedItems := make([]any, 0, len(inputItems))
++	instructionParts := make([]string, 0)
++	changed := false
++
++	for _, item := range inputItems {
++		itemMap, ok := item.(map[string]any)
++		if !ok {
++			normalizedItems = append(normalizedItems, item)
++			continue
++		}
++
++		role := strings.ToLower(strings.TrimSpace(common.Interface2String(itemMap["role"])))
++		if role != "system" && role != "developer" {
++			normalizedItems = append(normalizedItems, item)
++			continue
++		}
++
++		changed = true
++		itemTexts := make([]string, 0)
++		collectResponsesContentTexts(itemMap["content"], &itemTexts)
++		if len(itemTexts) > 0 {
++			instructionParts = append(instructionParts, strings.Join(itemTexts, "\n"))
++		}
++	}
++
++	if !changed {
++		return false, nil
++	}
++
++	if len(request.Instructions) > 0 {
++		if common.GetJsonType(request.Instructions) == "string" {
++			var existingInstructions string
++			if err := common.Unmarshal(request.Instructions, &existingInstructions); err == nil {
++				if text := strings.TrimSpace(existingInstructions); text != "" {
++					instructionParts = append([]string{text}, instructionParts...)
++				}
++			}
++		} else if text := strings.TrimSpace(string(request.Instructions)); text != "" {
++			instructionParts = append([]string{text}, instructionParts...)
++		}
++	}
++
++	if len(instructionParts) > 0 {
++		instructionsRaw, err := common.Marshal(strings.Join(instructionParts, "\n\n"))
++		if err != nil {
++			return false, err
++		}
++		request.Instructions = instructionsRaw
++	}
++
++	inputRaw, err := common.Marshal(normalizedItems)
++	if err != nil {
++		return false, err
++	}
++	request.Input = inputRaw
++	return true, nil
++}
++
+ func (a *Adaptor) ConvertGeminiRequest(c *gin.Context, info *relaycommon.RelayInfo, request *dto.GeminiChatRequest) (any, error) {
+ 	// 使用 service.GeminiToOpenAIRequest 转换请求格式
+ 	openaiRequest, err := service.GeminiToOpenAIRequest(request, info)
+@@ -241,6 +354,11 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
+ 	}
+ 	if info.ChannelType != constant.ChannelTypeOpenAI && info.ChannelType != constant.ChannelTypeAzure {
+ 		request.StreamOptions = nil
++	} else if info.ChannelType == constant.ChannelTypeOpenAI &&
++		request.StreamOptions != nil &&
++		!isNativeOpenAIBaseURL(info.ChannelBaseUrl) {
++		request.StreamOptions = nil
++		logger.LogInfo(c, "openai compatibility: removed stream_options for non-native upstream")
+ 	}
+ 	if info.ChannelType == constant.ChannelTypeOpenRouter {
+ 		if len(request.Usage) == 0 {
+@@ -596,6 +714,21 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
+ 	if info != nil && request.Reasoning != nil && request.Reasoning.Effort != "" {
+ 		info.ReasoningEffort = request.Reasoning.Effort
+ 	}
++	if info != nil &&
++		info.ChannelType == constant.ChannelTypeOpenAI &&
++		!isNativeOpenAIBaseURL(info.ChannelBaseUrl) {
++		if request.StreamOptions != nil {
++			request.StreamOptions = nil
++			logger.LogInfo(c, "openai responses compatibility: removed stream_options for non-native upstream")
++		}
++		normalized, err := normalizeResponsesSystemInputsToInstructions(&request)
++		if err != nil {
++			return nil, err
++		}
++		if normalized {
++			logger.LogInfo(c, "openai responses compatibility: moved system/developer input messages to instructions")
++		}
++	}
+ 	return request, nil
+ }
+ 
+diff --git a/relay/channel/openai/adaptor_responses_compat_test.go b/relay/channel/openai/adaptor_responses_compat_test.go
+new file mode 100644
+index 00000000..1262db05
+--- /dev/null
++++ b/relay/channel/openai/adaptor_responses_compat_test.go
+@@ -0,0 +1,189 @@
++package openai
++
++import (
++	"net/http/httptest"
++	"testing"
++
++	"github.com/QuantumNous/new-api/common"
++	"github.com/QuantumNous/new-api/constant"
++	"github.com/QuantumNous/new-api/dto"
++	relaycommon "github.com/QuantumNous/new-api/relay/common"
++	"github.com/gin-gonic/gin"
++)
++
++func TestIsNativeOpenAIBaseURL(t *testing.T) {
++	testCases := []struct {
++		name     string
++		baseURL  string
++		expected bool
++	}{
++		{
++			name:     "empty base url defaults to native",
++			baseURL:  "",
++			expected: true,
++		},
++		{
++			name:     "official openai host is native",
++			baseURL:  "https://api.openai.com",
++			expected: true,
++		},
++		{
++			name:     "non native host is not native",
++			baseURL:  "https://relay.nf.video",
++			expected: false,
++		},
++	}
++
++	for _, tc := range testCases {
++		t.Run(tc.name, func(t *testing.T) {
++			got := isNativeOpenAIBaseURL(tc.baseURL)
++			if got != tc.expected {
++				t.Fatalf("unexpected result for %q: got %t, want %t", tc.baseURL, got, tc.expected)
++			}
++		})
++	}
++}
++
++func TestNormalizeResponsesSystemInputsToInstructions(t *testing.T) {
++	request := &dto.OpenAIResponsesRequest{
++		Input: []byte(`[
++			{"role":"system","content":"系统提示 A"},
++			{"role":"developer","content":[{"type":"input_text","text":"开发者提示 B"}]},
++			{"role":"user","content":"你好"}
++		]`),
++	}
++
++	changed, err := normalizeResponsesSystemInputsToInstructions(request)
++	if err != nil {
++		t.Fatalf("expected nil error, got %v", err)
++	}
++	if !changed {
++		t.Fatalf("expected changed=true")
++	}
++
++	var instructions string
++	if err := common.Unmarshal(request.Instructions, &instructions); err != nil {
++		t.Fatalf("failed to unmarshal instructions: %v", err)
++	}
++	expectedInstructions := "系统提示 A\n\n开发者提示 B"
++	if instructions != expectedInstructions {
++		t.Fatalf("unexpected instructions: got %q, want %q", instructions, expectedInstructions)
++	}
++
++	var inputItems []map[string]any
++	if err := common.Unmarshal(request.Input, &inputItems); err != nil {
++		t.Fatalf("failed to unmarshal normalized input: %v", err)
++	}
++	if len(inputItems) != 1 {
++		t.Fatalf("expected 1 input item after normalization, got %d", len(inputItems))
++	}
++	if role := common.Interface2String(inputItems[0]["role"]); role != "user" {
++		t.Fatalf("expected remaining role=user, got %q", role)
++	}
++}
++
++func TestNormalizeResponsesSystemInputsToInstructionsMergeExistingInstructions(t *testing.T) {
++	request := &dto.OpenAIResponsesRequest{
++		Input:        []byte(`[{"role":"system","content":"新增系统提示"},{"role":"user","content":"hi"}]`),
++		Instructions: []byte(`"已有指令"`),
++	}
++
++	changed, err := normalizeResponsesSystemInputsToInstructions(request)
++	if err != nil {
++		t.Fatalf("expected nil error, got %v", err)
++	}
++	if !changed {
++		t.Fatalf("expected changed=true")
++	}
++
++	var instructions string
++	if err := common.Unmarshal(request.Instructions, &instructions); err != nil {
++		t.Fatalf("failed to unmarshal instructions: %v", err)
++	}
++	expectedInstructions := "已有指令\n\n新增系统提示"
++	if instructions != expectedInstructions {
++		t.Fatalf("unexpected merged instructions: got %q, want %q", instructions, expectedInstructions)
++	}
++}
++
++func TestConvertOpenAIResponsesRequestCompatForNonNativeUpstream(t *testing.T) {
++	gin.SetMode(gin.TestMode)
++	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
++
++	stream := true
++	request := dto.OpenAIResponsesRequest{
++		Model:         "gpt-5.3-codex",
++		Input:         []byte(`[{"role":"system","content":"系统规则"},{"role":"user","content":"hi"}]`),
++		Stream:        &stream,
++		StreamOptions: &dto.StreamOptions{IncludeUsage: true},
++	}
++	info := &relaycommon.RelayInfo{
++		ChannelMeta: &relaycommon.ChannelMeta{
++			ChannelType:    constant.ChannelTypeOpenAI,
++			ChannelBaseUrl: "https://relay.nf.video",
++		},
++	}
++
++	adaptor := &Adaptor{}
++	convertedAny, err := adaptor.ConvertOpenAIResponsesRequest(ctx, info, request)
++	if err != nil {
++		t.Fatalf("expected nil error, got %v", err)
++	}
++
++	converted, ok := convertedAny.(dto.OpenAIResponsesRequest)
++	if !ok {
++		t.Fatalf("expected dto.OpenAIResponsesRequest, got %T", convertedAny)
++	}
++	if converted.StreamOptions != nil {
++		t.Fatalf("expected stream_options to be removed for non-native upstream")
++	}
++
++	var instructions string
++	if err := common.Unmarshal(converted.Instructions, &instructions); err != nil {
++		t.Fatalf("failed to unmarshal converted instructions: %v", err)
++	}
++	if instructions != "系统规则" {
++		t.Fatalf("unexpected converted instructions: %q", instructions)
++	}
++
++	var inputItems []map[string]any
++	if err := common.Unmarshal(converted.Input, &inputItems); err != nil {
++		t.Fatalf("failed to unmarshal converted input: %v", err)
++	}
++	if len(inputItems) != 1 || common.Interface2String(inputItems[0]["role"]) != "user" {
++		t.Fatalf("expected only user input after normalization, got %+v", inputItems)
++	}
++}
++
++func TestConvertOpenAIRequestRemovesStreamOptionsForNonNativeUpstream(t *testing.T) {
++	gin.SetMode(gin.TestMode)
++	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
++
++	stream := true
++	request := &dto.GeneralOpenAIRequest{
++		Model:         "gpt-5.3-codex",
++		Messages:      []dto.Message{{Role: "user", Content: "hi"}},
++		Stream:        &stream,
++		StreamOptions: &dto.StreamOptions{IncludeUsage: true},
++	}
++
++	info := &relaycommon.RelayInfo{
++		ChannelMeta: &relaycommon.ChannelMeta{
++			ChannelType:    constant.ChannelTypeOpenAI,
++			ChannelBaseUrl: "https://relay.nf.video",
++		},
++	}
++	adaptor := &Adaptor{}
++	convertedAny, err := adaptor.ConvertOpenAIRequest(ctx, info, request)
++	if err != nil {
++		t.Fatalf("expected nil error, got %v", err)
++	}
++
++	converted, ok := convertedAny.(*dto.GeneralOpenAIRequest)
++	if !ok {
++		t.Fatalf("expected *dto.GeneralOpenAIRequest, got %T", convertedAny)
++	}
++	if converted.StreamOptions != nil {
++		t.Fatalf("expected stream_options to be removed for non-native upstream")
++	}
++}
+diff --git a/relay/channel/openai/helper.go b/relay/channel/openai/helper.go
+index 08811a77..e5a7c453 100644
+--- a/relay/channel/openai/helper.go
++++ b/relay/channel/openai/helper.go
+@@ -170,9 +170,16 @@ func handleLastResponse(lastStreamData string, responseId *string, createAt *int
+ 	systemFingerprint *string, model *string, usage **dto.Usage,
+ 	containStreamUsage *bool, info *relaycommon.RelayInfo,
+ 	shouldSendLastResp *bool) error {
++	trimmedLastStreamData := strings.TrimSpace(lastStreamData)
++	if trimmedLastStreamData == "" || strings.EqualFold(trimmedLastStreamData, "[DONE]") {
++		// Some providers may end stream without a final JSON chunk.
++		// Treat this as a normal termination and avoid JSON unmarshal error noise.
++		*shouldSendLastResp = false
++		return nil
++	}
+ 
+ 	var lastStreamResponse dto.ChatCompletionsStreamResponse
+-	if err := common.Unmarshal(common.StringToByteSlice(lastStreamData), &lastStreamResponse); err != nil {
++	if err := common.Unmarshal(common.StringToByteSlice(trimmedLastStreamData), &lastStreamResponse); err != nil {
+ 		return err
+ 	}
+ 
+diff --git a/relay/channel/openai/helper_test.go b/relay/channel/openai/helper_test.go
+new file mode 100644
+index 00000000..d8c8a7be
+--- /dev/null
++++ b/relay/channel/openai/helper_test.go
+@@ -0,0 +1,177 @@
++package openai
++
++import (
++	"testing"
++
++	"github.com/QuantumNous/new-api/dto"
++	relaycommon "github.com/QuantumNous/new-api/relay/common"
++)
++
++func TestHandleLastResponse_EmptyLastStreamData(t *testing.T) {
++	var (
++		responseId        string
++		createAt          int64
++		systemFingerprint string
++		model             string
++		containUsage      bool
++		shouldSend        = true
++		usage             = &dto.Usage{}
++	)
++
++	info := &relaycommon.RelayInfo{
++		ShouldIncludeUsage: false,
++	}
++
++	err := handleLastResponse(
++		"",
++		&responseId,
++		&createAt,
++		&systemFingerprint,
++		&model,
++		&usage,
++		&containUsage,
++		info,
++		&shouldSend,
++	)
++	if err != nil {
++		t.Fatalf("expected nil error for empty last stream data, got %v", err)
++	}
++	if shouldSend {
++		t.Fatalf("expected shouldSendLastResp=false when last stream data is empty")
++	}
++}
++
++func TestHandleLastResponse_ValidChunkWithUsage(t *testing.T) {
++	var (
++		responseId        string
++		createAt          int64
++		systemFingerprint string
++		model             string
++		containUsage      bool
++		shouldSend        = true
++		usage             = &dto.Usage{}
++	)
++
++	info := &relaycommon.RelayInfo{
++		ShouldIncludeUsage: false,
++	}
++
++	lastStreamData := `{
++		"id":"chatcmpl-test",
++		"object":"chat.completion.chunk",
++		"created":1776044447,
++		"model":"MiniMax-M2.7",
++		"choices":[
++			{
++				"index":0,
++				"delta":{"content":"hi"},
++				"finish_reason":null
++			}
++		],
++		"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}
++	}`
++
++	err := handleLastResponse(
++		lastStreamData,
++		&responseId,
++		&createAt,
++		&systemFingerprint,
++		&model,
++		&usage,
++		&containUsage,
++		info,
++		&shouldSend,
++	)
++	if err != nil {
++		t.Fatalf("expected nil error for valid last stream data, got %v", err)
++	}
++	if responseId != "chatcmpl-test" {
++		t.Fatalf("unexpected response id: %s", responseId)
++	}
++	if createAt != 1776044447 {
++		t.Fatalf("unexpected created timestamp: %d", createAt)
++	}
++	if model != "MiniMax-M2.7" {
++		t.Fatalf("unexpected model: %s", model)
++	}
++	if !containUsage {
++		t.Fatalf("expected containStreamUsage=true when chunk carries usage")
++	}
++	if usage == nil || usage.TotalTokens != 3 {
++		t.Fatalf("expected usage total tokens=3, got %+v", usage)
++	}
++	if !shouldSend {
++		t.Fatalf("expected shouldSendLastResp=true for valid content chunk")
++	}
++}
++
++func TestNormalizeMiniMaxStreamResponse_MessageContentFallback(t *testing.T) {
++	data := `{
++		"id":"chatcmpl-mm-1",
++		"object":"chat.completion",
++		"created":1776044447,
++		"model":"MiniMax-M2.7",
++		"choices":[
++			{
++				"index":0,
++				"finish_reason":"stop",
++				"message":{
++					"role":"assistant",
++					"content":"好",
++					"reasoning_content":"internal reasoning"
++				}
++			}
++		],
++		"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}
++	}`
++
++	resp, err := normalizeMiniMaxStreamResponse(data)
++	if err != nil {
++		t.Fatalf("expected nil error, got %v", err)
++	}
++	if resp.Object != "chat.completion.chunk" {
++		t.Fatalf("expected object normalized to chat.completion.chunk, got %s", resp.Object)
++	}
++	if len(resp.Choices) != 1 {
++		t.Fatalf("expected 1 choice, got %d", len(resp.Choices))
++	}
++	if got := resp.Choices[0].Delta.GetContentString(); got != "好" {
++		t.Fatalf("expected delta content from message content, got %q", got)
++	}
++	if got := resp.Choices[0].Delta.GetReasoningContent(); got != "internal reasoning" {
++		t.Fatalf("expected reasoning content from message reasoning_content, got %q", got)
++	}
++	if resp.Choices[0].FinishReason != nil {
++		t.Fatalf("expected finish_reason to be cleared when content exists")
++	}
++	if resp.Usage == nil || resp.Usage.TotalTokens != 3 {
++		t.Fatalf("expected usage preserved, got %+v", resp.Usage)
++	}
++}
++
++func TestNormalizeMiniMaxStreamResponse_KeepFinishReasonWithoutContent(t *testing.T) {
++	data := `{
++		"id":"chatcmpl-mm-2",
++		"object":"chat.completion.chunk",
++		"created":1776044447,
++		"model":"MiniMax-M2.7",
++		"choices":[
++			{
++				"index":0,
++				"finish_reason":"stop",
++				"delta":{"content":""}
++			}
++		]
++	}`
++
++	resp, err := normalizeMiniMaxStreamResponse(data)
++	if err != nil {
++		t.Fatalf("expected nil error, got %v", err)
++	}
++	if len(resp.Choices) != 1 {
++		t.Fatalf("expected 1 choice, got %d", len(resp.Choices))
++	}
++	if resp.Choices[0].FinishReason == nil || *resp.Choices[0].FinishReason != "stop" {
++		t.Fatalf("expected finish_reason=stop to be preserved when content is empty")
++	}
++}
+diff --git a/relay/channel/openai/relay-openai.go b/relay/channel/openai/relay-openai.go
+index 9ef2c490..07947631 100644
+--- a/relay/channel/openai/relay-openai.go
++++ b/relay/channel/openai/relay-openai.go
+@@ -22,21 +22,160 @@ import (
+ 	"github.com/gorilla/websocket"
+ )
+ 
++type miniMaxStreamCompatChoice struct {
++	Delta        dto.ChatCompletionsStreamResponseChoiceDelta `json:"delta,omitempty"`
++	Message      *dto.Message                                 `json:"message,omitempty"`
++	Logprobs     *any                                         `json:"logprobs"`
++	FinishReason *string                                      `json:"finish_reason"`
++	Index        int                                          `json:"index"`
++}
++
++type miniMaxStreamCompatResponse struct {
++	Id                string                      `json:"id"`
++	Object            string                      `json:"object"`
++	Created           int64                       `json:"created"`
++	Model             string                      `json:"model"`
++	SystemFingerprint *string                     `json:"system_fingerprint"`
++	Choices           []miniMaxStreamCompatChoice `json:"choices"`
++	Usage             *dto.Usage                  `json:"usage"`
++}
++
++type miniMaxBaseResp struct {
++	StatusCode int    `json:"status_code"`
++	StatusMsg  string `json:"status_msg"`
++}
++
++type miniMaxBusinessErrorEnvelope struct {
++	BaseResp *miniMaxBaseResp `json:"base_resp"`
++}
++
++func parseMiniMaxBusinessError(data string) *types.NewAPIError {
++	if strings.TrimSpace(data) == "" {
++		return nil
++	}
++
++	var envelope miniMaxBusinessErrorEnvelope
++	if err := common.UnmarshalJsonStr(data, &envelope); err != nil {
++		return nil
++	}
++	if envelope.BaseResp == nil || envelope.BaseResp.StatusCode == 0 {
++		return nil
++	}
++
++	message := strings.TrimSpace(envelope.BaseResp.StatusMsg)
++	if message == "" {
++		message = fmt.Sprintf("minimax upstream business error (status_code=%d)", envelope.BaseResp.StatusCode)
++	} else {
++		message = fmt.Sprintf("minimax upstream business error: %s", message)
++	}
++
++	return types.WithOpenAIError(types.OpenAIError{
++		Message: message,
++		Type:    "upstream_error",
++		Code:    envelope.BaseResp.StatusCode,
++	}, http.StatusBadRequest)
++}
++
++func normalizeMiniMaxStreamResponse(data string) (*dto.ChatCompletionsStreamResponse, error) {
++	var raw miniMaxStreamCompatResponse
++	if err := common.UnmarshalJsonStr(data, &raw); err != nil {
++		return nil, err
++	}
++
++	normalized := &dto.ChatCompletionsStreamResponse{
++		Id:                raw.Id,
++		Object:            raw.Object,
++		Created:           raw.Created,
++		Model:             raw.Model,
++		SystemFingerprint: raw.SystemFingerprint,
++		Choices:           make([]dto.ChatCompletionsStreamResponseChoice, 0, len(raw.Choices)),
++		Usage:             raw.Usage,
++	}
++
++	// MiniMax may end stream with object=chat.completion (non-chunk shape).
++	// Normalize to chat.completion.chunk for better OpenAI-stream client compatibility.
++	if normalized.Object == "chat.completion" {
++		normalized.Object = "chat.completion.chunk"
++	}
++
++	for _, choice := range raw.Choices {
++		normalizedChoice := dto.ChatCompletionsStreamResponseChoice{
++			Delta:        choice.Delta,
++			Logprobs:     choice.Logprobs,
++			FinishReason: choice.FinishReason,
++			Index:        choice.Index,
++		}
++
++		if choice.Message != nil {
++			if normalizedChoice.Delta.GetContentString() == "" {
++				content := choice.Message.StringContent()
++				if content != "" {
++					normalizedChoice.Delta.SetContentString(content)
++				}
++			}
++			if normalizedChoice.Delta.GetReasoningContent() == "" {
++				reasoning := choice.Message.ReasoningContent
++				if reasoning == "" {
++					reasoning = choice.Message.Reasoning
++				}
++				if reasoning != "" {
++					normalizedChoice.Delta.SetReasoningContent(reasoning)
++				}
++			}
++			if normalizedChoice.Delta.Role == "" {
++				normalizedChoice.Delta.Role = choice.Message.Role
++			}
++		}
++
++		// Some downstream parsers ignore content when finish_reason is present
++		// in the same chunk. Keep the content chunk readable, final completion
++		// is still indicated by trailing [DONE].
++		if normalizedChoice.FinishReason != nil && normalizedChoice.Delta.GetContentString() != "" {
++			normalizedChoice.FinishReason = nil
++		}
++
++		normalized.Choices = append(normalized.Choices, normalizedChoice)
++	}
++
++	return normalized, nil
++}
++
+ func sendStreamData(c *gin.Context, info *relaycommon.RelayInfo, data string, forceFormat bool, thinkToContent bool) error {
+ 	if data == "" {
+ 		return nil
+ 	}
+ 
+-	if !forceFormat && !thinkToContent {
++	needMiniMaxCompat := info.ChannelType == constant.ChannelTypeMiniMax
++	logMiniMaxChunk := func(resp *dto.ChatCompletionsStreamResponse) {
++		if !needMiniMaxCompat || resp == nil {
++			return
++		}
++		if b, err := common.Marshal(resp); err == nil {
++			logger.LogInfo(c, "minimax downstream response chunk: "+string(b))
++		} else {
++			logger.LogError(c, "failed to marshal minimax downstream response chunk: "+err.Error())
++		}
++	}
++
++	if !forceFormat && !thinkToContent && !needMiniMaxCompat {
+ 		return helper.StringData(c, data)
+ 	}
+ 
+ 	var lastStreamResponse dto.ChatCompletionsStreamResponse
+-	if err := common.UnmarshalJsonStr(data, &lastStreamResponse); err != nil {
+-		return err
++	if needMiniMaxCompat {
++		normalized, err := normalizeMiniMaxStreamResponse(data)
++		if err != nil {
++			return err
++		}
++		lastStreamResponse = *normalized
++	} else {
++		if err := common.UnmarshalJsonStr(data, &lastStreamResponse); err != nil {
++			return err
++		}
+ 	}
+ 
+ 	if !thinkToContent {
++		logMiniMaxChunk(&lastStreamResponse)
+ 		return helper.ObjectData(c, lastStreamResponse)
+ 	}
+ 
+@@ -65,11 +204,13 @@ func sendStreamData(c *gin.Context, info *relaycommon.RelayInfo, data string, fo
+ 			}
+ 			info.ThinkingContentInfo.IsFirstThinkingContent = false
+ 			info.ThinkingContentInfo.HasSentThinkingContent = true
++			logMiniMaxChunk(response)
+ 			return helper.ObjectData(c, response)
+ 		}
+ 	}
+ 
+ 	if lastStreamResponse.Choices == nil || len(lastStreamResponse.Choices) == 0 {
++		logMiniMaxChunk(&lastStreamResponse)
+ 		return helper.ObjectData(c, lastStreamResponse)
+ 	}
+ 
+@@ -85,6 +226,7 @@ func sendStreamData(c *gin.Context, info *relaycommon.RelayInfo, data string, fo
+ 				response.Choices[j].Delta.Reasoning = nil
+ 			}
+ 			info.ThinkingContentInfo.SendLastThinkingContent = true
++			logMiniMaxChunk(response)
+ 			helper.ObjectData(c, response)
+ 		}
+ 
+@@ -100,6 +242,7 @@ func sendStreamData(c *gin.Context, info *relaycommon.RelayInfo, data string, fo
+ 		}
+ 	}
+ 
++	logMiniMaxChunk(&lastStreamResponse)
+ 	return helper.ObjectData(c, lastStreamResponse)
+ }
+ 
+@@ -111,6 +254,17 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
+ 
+ 	defer service.CloseResponseBodyGracefully(resp)
+ 
++	isMiniMax := info != nil && info.ChannelType == constant.ChannelTypeMiniMax
++	if isMiniMax {
++		logger.LogInfo(c, fmt.Sprintf(
++			"minimax upstream response meta: status=%d content_type=%q transfer_encoding=%v",
++			resp.StatusCode,
++			resp.Header.Get("Content-Type"),
++			resp.TransferEncoding,
++		))
++		logger.LogInfo(c, "minimax upstream response headers: "+fmt.Sprintf("%v", resp.Header))
++	}
++
+ 	model := info.UpstreamModelName
+ 	var responseId string
+ 	var createAt int64 = 0
+@@ -122,11 +276,19 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
+ 	var streamItems []string // store stream items
+ 	var lastStreamData string
+ 	var secondLastStreamData string // 存储倒数第二个stream data，用于音频模型
++	var minimaxUpstreamChunkCount int
++	var minimaxUpstreamChunkBytes int
+ 
+ 	// 检查是否为音频模型
+ 	isAudioModel := strings.Contains(strings.ToLower(model), "audio")
+ 
+ 	helper.StreamScannerHandler(c, resp, info, func(data string) bool {
++		if isMiniMax {
++			minimaxUpstreamChunkCount++
++			minimaxUpstreamChunkBytes += len(data)
++			logger.LogInfo(c, "minimax upstream response data chunk: "+data)
++		}
++
+ 		if lastStreamData != "" {
+ 			err := HandleStreamFormat(c, info, lastStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent)
+ 			if err != nil {
+@@ -145,6 +307,23 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
+ 		return true
+ 	})
+ 
++	if isMiniMax {
++		if minimaxUpstreamChunkCount == 0 {
++			logger.LogError(c, "minimax upstream response contains no data chunks")
++		} else {
++			logger.LogInfo(c, fmt.Sprintf(
++				"minimax upstream response chunk summary: count=%d bytes=%d",
++				minimaxUpstreamChunkCount,
++				minimaxUpstreamChunkBytes,
++			))
++		}
++
++		if businessErr := parseMiniMaxBusinessError(lastStreamData); businessErr != nil {
++			logger.LogError(c, "minimax upstream business error detected: "+businessErr.Error())
++			return nil, businessErr
++		}
++	}
++
+ 	// 对音频模型，从倒数第二个stream data中提取usage信息
+ 	if isAudioModel && secondLastStreamData != "" {
+ 		var streamResp struct {
+@@ -295,6 +474,10 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
+ 		responseBody = geminiRespStr
+ 	}
+ 
++	if info.ChannelType == constant.ChannelTypeMiniMax {
++		logger.LogInfo(c, "minimax downstream response body: "+string(responseBody))
++	}
++
+ 	service.IOCopyBytesGracefully(c, resp, responseBody)
+ 
+ 	return &simpleResponse.Usage, nil
+diff --git a/relay/compatible_handler.go b/relay/compatible_handler.go
+index 7a5624eb..f9ce8336 100644
+--- a/relay/compatible_handler.go
++++ b/relay/compatible_handler.go
+@@ -6,6 +6,7 @@ import (
+ 	"io"
+ 	"net/http"
+ 	"strings"
++	"time"
+ 
+ 	"github.com/QuantumNous/new-api/common"
+ 	"github.com/QuantumNous/new-api/constant"
+@@ -65,6 +66,10 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
+ 
+ 	info.ShouldIncludeUsage = includeUsage
+ 
++	if info.ChannelType == constant.ChannelTypeMiniMax {
++		applyMiniMaxCompatibility(c, request)
++	}
++
+ 	adaptor := GetAdaptor(info.ApiType)
+ 	if adaptor == nil {
+ 		return types.NewError(fmt.Errorf("invalid api type: %d", info.ApiType), types.ErrorCodeInvalidApiType, types.ErrOptionWithSkipRetry())
+@@ -94,6 +99,7 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
+ 	}
+ 
+ 	var requestBody io.Reader
++	var minimaxUpstreamPayload []byte
+ 
+ 	if passThroughGlobal || info.ChannelSetting.PassThroughBodyEnabled {
+ 		storage, err := common.GetBodyStorage(c)
+@@ -105,7 +111,21 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
+ 				println("requestBody: ", string(debugBytes))
+ 			}
+ 		}
+-		requestBody = common.ReaderOnly(storage)
++		if info.ChannelType == constant.ChannelTypeMiniMax {
++			if bodyBytes, bErr := storage.Bytes(); bErr == nil {
++				minimaxUpstreamPayload = append([]byte(nil), bodyBytes...)
++				bodyText := string(bodyBytes)
++				logger.LogInfo(c, "minimax downstream request body: "+bodyText)
++				logger.LogInfo(c, "minimax upstream request body (pass-through): "+bodyText)
++			} else {
++				logger.LogError(c, "failed to read minimax pass-through request body: "+bErr.Error())
++			}
++		}
++		if info.ChannelType == constant.ChannelTypeMiniMax && len(minimaxUpstreamPayload) > 0 {
++			requestBody = bytes.NewReader(minimaxUpstreamPayload)
++		} else {
++			requestBody = common.ReaderOnly(storage)
++		}
+ 	} else {
+ 		convertedRequest, err := adaptor.ConvertOpenAIRequest(c, info, request)
+ 		if err != nil {
+@@ -174,13 +194,42 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
+ 			}
+ 		}
+ 
++		if info.ChannelType == constant.ChannelTypeMiniMax {
++			minimaxUpstreamPayload = append([]byte(nil), jsonData...)
++			logger.LogInfo(
++				c,
++				fmt.Sprintf(
++					"minimax request summary: model=%s stream=%t messages=%d max_tokens=%d max_completion_tokens=%d temperature_set=%t top_p_set=%t",
++					request.Model,
++					lo.FromPtrOr(request.Stream, false),
++					len(request.Messages),
++					lo.FromPtrOr(request.MaxTokens, uint(0)),
++					lo.FromPtrOr(request.MaxCompletionTokens, uint(0)),
++					request.Temperature != nil,
++					request.TopP != nil,
++				),
++			)
++
++			if storage, sErr := common.GetBodyStorage(c); sErr == nil {
++				if downstreamBody, bErr := storage.Bytes(); bErr == nil {
++					logger.LogInfo(c, "minimax downstream request body: "+string(downstreamBody))
++				} else {
++					logger.LogError(c, "failed to read minimax downstream request body: "+bErr.Error())
++				}
++			} else {
++				logger.LogError(c, "failed to read minimax downstream request body storage: "+sErr.Error())
++			}
++
++			logger.LogInfo(c, "minimax upstream request body: "+string(jsonData))
++		}
++
+ 		logger.LogDebug(c, fmt.Sprintf("text request body: %s", string(jsonData)))
+ 
+ 		requestBody = bytes.NewBuffer(jsonData)
+ 	}
+ 
+ 	var httpResp *http.Response
+-	resp, err := adaptor.DoRequest(c, info, requestBody)
++	resp, err := doRequestWithMiniMaxRetry(c, adaptor, info, requestBody, minimaxUpstreamPayload)
+ 	if err != nil {
+ 		return types.NewOpenAIError(err, types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
+ 	}
+@@ -215,3 +264,333 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
+ 	}
+ 	return nil
+ }
++
++func doRequestWithMiniMaxRetry(c *gin.Context, adaptor interface {
++	DoRequest(c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader) (any, error)
++}, info *relaycommon.RelayInfo, requestBody io.Reader, payload []byte) (any, error) {
++	resp, err := adaptor.DoRequest(c, info, requestBody)
++	if err == nil || info.ChannelType != constant.ChannelTypeMiniMax || len(payload) == 0 || !shouldRetryMiniMaxDoRequestError(err) {
++		return resp, err
++	}
++
++	const maxAttempts = 3
++	lastErr := err
++	for attempt := 2; attempt <= maxAttempts; attempt++ {
++		backoff := time.Duration(attempt-1) * 400 * time.Millisecond
++		logger.LogWarn(
++			c,
++			fmt.Sprintf(
++				"minimax do request failed (attempt=%d/%d): %v; retrying in %s",
++				attempt-1,
++				maxAttempts,
++				lastErr,
++				backoff,
++			),
++		)
++		time.Sleep(backoff)
++
++		resp, err = adaptor.DoRequest(c, info, bytes.NewReader(payload))
++		if err == nil {
++			logger.LogInfo(c, fmt.Sprintf("minimax do request retry succeeded on attempt=%d/%d", attempt, maxAttempts))
++			return resp, nil
++		}
++		lastErr = err
++		if !shouldRetryMiniMaxDoRequestError(lastErr) {
++			break
++		}
++	}
++
++	return nil, lastErr
++}
++
++func shouldRetryMiniMaxDoRequestError(err error) bool {
++	if err == nil {
++		return false
++	}
++	errMsg := strings.ToLower(err.Error())
++	retryablePatterns := []string{
++		"connection reset by peer",
++		"broken pipe",
++		"connection refused",
++		"tls handshake timeout",
++		"i/o timeout",
++		"context deadline exceeded",
++		"unexpected eof",
++		"eof",
++		"http2: server sent goaway",
++		"temporary failure in name resolution",
++	}
++	for _, pattern := range retryablePatterns {
++		if strings.Contains(errMsg, pattern) {
++			return true
++		}
++	}
++	return false
++}
++
++func applyMiniMaxCompatibility(c *gin.Context, request *dto.GeneralOpenAIRequest) {
++	if request == nil {
++		return
++	}
++
++	// MiniMax OpenAI-compatible endpoint is stricter with request shape.
++	// Keep tool-calling payload, but sanitize fields known to trigger 2013.
++	logger.LogInfo(c, "minimax compatibility version: v20260413-flat-tool-history")
++	if request.StreamOptions != nil {
++		request.StreamOptions = nil
++		logger.LogInfo(c, "minimax compatibility: removed stream_options from upstream request")
++	}
++	if len(request.FunctionCall) > 0 {
++		request.FunctionCall = nil
++		logger.LogInfo(c, "minimax compatibility: removed deprecated function_call from upstream request")
++	}
++
++	if len(request.Messages) == 0 {
++		return
++	}
++
++	var (
++		stringMessages       int
++		arrayMessages        int
++		nilMessages          int
++		otherMessages        int
++		textBlocks           int
++		nonTextBlocks        int
++		convertedMessages    int
++		strippedReasonFields int
++		removedToolCalls     int
++		removedToolMessages  int
++		clearedToolCallBlock int
++		mergedConsecutive    int
++		mergedSystemMessages int
++		movedSystemToFront   bool
++	)
++
++	for i := range request.Messages {
++		message := &request.Messages[i]
++
++		if message.ReasoningContent != "" || message.Reasoning != "" {
++			message.ReasoningContent = ""
++			message.Reasoning = ""
++			strippedReasonFields++
++		}
++
++		switch message.Content.(type) {
++		case nil:
++			nilMessages++
++			// Keep tool-calling continuity while ensuring content remains a valid scalar.
++			message.SetStringContent("")
++			convertedMessages++
++		case string:
++			stringMessages++
++		case []dto.MediaContent:
++			arrayMessages++
++			contents := message.Content.([]dto.MediaContent)
++			textParts := make([]string, 0, len(contents))
++			for _, content := range contents {
++				if content.Type == dto.ContentTypeText {
++					textBlocks++
++					if content.Text != "" {
++						textParts = append(textParts, content.Text)
++					}
++					continue
++				}
++				nonTextBlocks++
++			}
++
++			message.SetStringContent(strings.Join(textParts, "\n"))
++			convertedMessages++
++		case []any:
++			arrayMessages++
++			contents := message.ParseContent()
++			if len(contents) == 0 {
++				message.SetStringContent(message.StringContent())
++				convertedMessages++
++				break
++			}
++
++			textParts := make([]string, 0, len(contents))
++			for _, content := range contents {
++				if content.Type == dto.ContentTypeText {
++					textBlocks++
++					if content.Text != "" {
++						textParts = append(textParts, content.Text)
++					}
++					continue
++				}
++				nonTextBlocks++
++			}
++
++			message.SetStringContent(strings.Join(textParts, "\n"))
++			convertedMessages++
++		default:
++			otherMessages++
++			raw, err := common.Marshal(message.Content)
++			if err != nil {
++				message.SetStringContent(fmt.Sprintf("%v", message.Content))
++			} else {
++				message.SetStringContent(string(raw))
++			}
++			convertedMessages++
++		}
++	}
++
++	// MiniMax is sensitive to cross-provider function-call transcripts.
++	// Keep current tools capability, but flatten historical tool-call traces into plain chat.
++	filteredMessages := make([]dto.Message, 0, len(request.Messages))
++	for i := range request.Messages {
++		message := request.Messages[i]
++		if message.Role == "tool" {
++			removedToolMessages++
++			continue
++		}
++
++		if len(message.ToolCalls) > 0 {
++			var toolCalls []dto.ToolCallRequest
++			if err := common.Unmarshal(message.ToolCalls, &toolCalls); err != nil {
++				clearedToolCallBlock++
++				removedToolCalls++
++			} else {
++				removedToolCalls += len(toolCalls)
++			}
++			message.ToolCalls = nil
++			content := strings.TrimSpace(message.StringContent())
++			if content == "" || content == "[tool_call]" {
++				removedToolMessages++
++				continue
++			}
++		}
++
++		if message.ToolCallId != "" {
++			message.ToolCallId = ""
++		}
++
++		filteredMessages = append(filteredMessages, message)
++	}
++	request.Messages, mergedConsecutive, mergedSystemMessages, movedSystemToFront = compactMiniMaxMessages(filteredMessages)
++	roleSequence := miniMaxRoleSequence(request.Messages)
++
++	logger.LogInfo(
++		c,
++		fmt.Sprintf(
++			"minimax compatibility: preserved tools/tool_choice/history, normalized messages=%d role_sequence=%s (string=%d array=%d nil=%d other=%d converted=%d text_blocks=%d non_text_blocks=%d stripped_reasoning_fields=%d removed_tool_calls=%d removed_tool_messages=%d cleared_tool_call_blocks=%d merged_consecutive_roles=%d merged_system_messages=%d moved_system_to_front=%t)",
++			len(request.Messages),
++			roleSequence,
++			stringMessages,
++			arrayMessages,
++			nilMessages,
++			otherMessages,
++			convertedMessages,
++			textBlocks,
++			nonTextBlocks,
++			strippedReasonFields,
++			removedToolCalls,
++			removedToolMessages,
++			clearedToolCallBlock,
++			mergedConsecutive,
++			mergedSystemMessages,
++			movedSystemToFront,
++		),
++	)
++}
++
++func compactMiniMaxMessages(messages []dto.Message) ([]dto.Message, int, int, bool) {
++	if len(messages) == 0 {
++		return messages, 0, 0, false
++	}
++
++	roleCollapsed, mergedConsecutive := collapseConsecutiveMiniMaxRoles(messages)
++
++	if len(roleCollapsed) == 0 {
++		return roleCollapsed, mergedConsecutive, 0, false
++	}
++
++	systemCount := 0
++	systemFirstIndex := -1
++	systemContents := make([]string, 0, 1)
++	nonSystemMessages := make([]dto.Message, 0, len(roleCollapsed))
++	for i := range roleCollapsed {
++		message := roleCollapsed[i]
++		if message.Role != "system" {
++			nonSystemMessages = append(nonSystemMessages, message)
++			continue
++		}
++
++		systemCount++
++		if systemFirstIndex == -1 {
++			systemFirstIndex = i
++		}
++		text := strings.TrimSpace(message.StringContent())
++		if text != "" {
++			systemContents = append(systemContents, text)
++		}
++	}
++
++	if systemCount == 0 {
++		return roleCollapsed, mergedConsecutive, 0, false
++	}
++
++	mergedSystemMessages := systemCount - 1
++	movedSystemToFront := systemFirstIndex > 0
++	systemMessage := dto.Message{
++		Role: "system",
++	}
++	systemMessage.SetStringContent(strings.Join(systemContents, "\n\n"))
++
++	normalizedMessages := make([]dto.Message, 0, 1+len(nonSystemMessages))
++	normalizedMessages = append(normalizedMessages, systemMessage)
++	normalizedMessages = append(normalizedMessages, nonSystemMessages...)
++	normalizedMessages, mergedAfterSystem := collapseConsecutiveMiniMaxRoles(normalizedMessages)
++	mergedConsecutive += mergedAfterSystem
++	return normalizedMessages, mergedConsecutive, mergedSystemMessages, movedSystemToFront
++}
++
++func collapseConsecutiveMiniMaxRoles(messages []dto.Message) ([]dto.Message, int) {
++	if len(messages) == 0 {
++		return messages, 0
++	}
++
++	mergedConsecutive := 0
++	roleCollapsed := make([]dto.Message, 0, len(messages))
++	for i := range messages {
++		message := messages[i]
++		message.Role = strings.ToLower(strings.TrimSpace(message.Role))
++		if message.Role == "" {
++			continue
++		}
++		message.SetStringContent(strings.TrimSpace(message.StringContent()))
++
++		if len(roleCollapsed) > 0 {
++			last := &roleCollapsed[len(roleCollapsed)-1]
++			if last.Role == message.Role {
++				mergedConsecutive++
++				lastContent := strings.TrimSpace(last.StringContent())
++				currentContent := strings.TrimSpace(message.StringContent())
++				if lastContent == "" {
++					last.SetStringContent(currentContent)
++				} else if currentContent != "" {
++					last.SetStringContent(lastContent + "\n\n" + currentContent)
++				}
++				continue
++			}
++		}
++
++		roleCollapsed = append(roleCollapsed, message)
++	}
++	return roleCollapsed, mergedConsecutive
++}
++
++func miniMaxRoleSequence(messages []dto.Message) string {
++	if len(messages) == 0 {
++		return "empty"
++	}
++	roles := make([]string, 0, len(messages))
++	for i := range messages {
++		role := strings.TrimSpace(messages[i].Role)
++		if role == "" {
++			role = "unknown"
++		}
++		roles = append(roles, role)
++	}
++	return strings.Join(roles, "->")
++}
+diff --git a/relay/compatible_handler_test.go b/relay/compatible_handler_test.go
+new file mode 100644
+index 00000000..e78df90a
+--- /dev/null
++++ b/relay/compatible_handler_test.go
+@@ -0,0 +1,297 @@
++package relay
++
++import (
++	"errors"
++	"net/http/httptest"
++	"testing"
++
++	"github.com/QuantumNous/new-api/dto"
++	"github.com/gin-gonic/gin"
++)
++
++func TestApplyMiniMaxCompatibility_PreserveToolsAndFlattenToolHistory(t *testing.T) {
++	c, _ := gin.CreateTestContext(httptest.NewRecorder())
++	c.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
++
++	includeUsage := true
++	request := &dto.GeneralOpenAIRequest{
++		Model: "MiniMax-M2.7",
++		StreamOptions: &dto.StreamOptions{
++			IncludeUsage: includeUsage,
++		},
++		FunctionCall: []byte(`{"name":"legacy_func"}`),
++		Tools: []dto.ToolCallRequest{
++			{
++				Type: "function",
++				Function: dto.FunctionRequest{
++					Name: "search",
++				},
++			},
++		},
++		ToolChoice: map[string]any{
++			"type": "auto",
++		},
++		Messages: []dto.Message{
++			{
++				Role: "user",
++				Content: []any{
++					map[string]any{
++						"type": "text",
++						"text": "hello",
++					},
++					map[string]any{
++						"type": "image_url",
++						"image_url": map[string]any{
++							"url": "https://example.com/a.png",
++						},
++					},
++				},
++			},
++			{
++				Role:             "assistant",
++				Content:          nil,
++				ReasoningContent: "internal thinking",
++				ToolCalls:        []byte(`[{"id":"call_1","type":"function","function":{"name":"search","arguments":"{}"}}]`),
++			},
++			{
++				Role: "tool",
++				Content: []any{
++					map[string]any{
++						"type": "text",
++						"text": "tool result",
++					},
++				},
++				ToolCallId: "call_1",
++			},
++		},
++	}
++
++	applyMiniMaxCompatibility(c, request)
++
++	if request.StreamOptions != nil {
++		t.Fatalf("expected stream_options to be removed")
++	}
++	if len(request.FunctionCall) != 0 {
++		t.Fatalf("expected function_call to be removed")
++	}
++	if len(request.Tools) != 1 {
++		t.Fatalf("expected tools to be preserved, got %d", len(request.Tools))
++	}
++	if request.ToolChoice == nil {
++		t.Fatalf("expected tool_choice to be preserved")
++	}
++	if len(request.Messages) != 1 {
++		t.Fatalf("expected tool history to be flattened, got %d messages", len(request.Messages))
++	}
++
++	if got := request.Messages[0].StringContent(); got != "hello" {
++		t.Fatalf("expected user content to be normalized to text, got %q", got)
++	}
++	if request.Messages[0].Role != "user" {
++		t.Fatalf("expected remaining message to be user, got %s", request.Messages[0].Role)
++	}
++}
++
++func TestApplyMiniMaxCompatibility_ImageOnlyContentBecomesEmptyString(t *testing.T) {
++	c, _ := gin.CreateTestContext(httptest.NewRecorder())
++	c.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
++
++	request := &dto.GeneralOpenAIRequest{
++		Model: "MiniMax-M2.7",
++		Messages: []dto.Message{
++			{
++				Role: "user",
++				Content: []any{
++					map[string]any{
++						"type": "image_url",
++						"image_url": map[string]any{
++							"url": "https://example.com/image.png",
++						},
++					},
++				},
++			},
++		},
++	}
++
++	applyMiniMaxCompatibility(c, request)
++
++	if len(request.Messages) != 1 {
++		t.Fatalf("expected message count unchanged, got %d", len(request.Messages))
++	}
++	if !request.Messages[0].IsStringContent() {
++		t.Fatalf("expected image-only content to be normalized to string")
++	}
++	if got := request.Messages[0].StringContent(); got != "" {
++		t.Fatalf("expected empty string after removing unsupported non-text content, got %q", got)
++	}
++}
++
++func TestApplyMiniMaxCompatibility_MediaContentSliceToString(t *testing.T) {
++	c, _ := gin.CreateTestContext(httptest.NewRecorder())
++	c.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
++
++	request := &dto.GeneralOpenAIRequest{
++		Model: "MiniMax-M2.7",
++		Messages: []dto.Message{
++			{
++				Role: "user",
++				Content: []dto.MediaContent{
++					{
++						Type: dto.ContentTypeText,
++						Text: "line1",
++					},
++					{
++						Type: dto.ContentTypeText,
++						Text: "line2",
++					},
++					{
++						Type: dto.ContentTypeImageURL,
++						ImageUrl: &dto.MessageImageUrl{
++							Url: "https://example.com/ignored.png",
++						},
++					},
++				},
++			},
++		},
++	}
++
++	applyMiniMaxCompatibility(c, request)
++
++	if !request.Messages[0].IsStringContent() {
++		t.Fatalf("expected media content slice to be normalized into string")
++	}
++	if got := request.Messages[0].StringContent(); got != "line1\nline2" {
++		t.Fatalf("unexpected normalized content, got %q", got)
++	}
++}
++
++func TestApplyMiniMaxCompatibility_RemoveUnknownToolCallsAndToolMessages(t *testing.T) {
++	c, _ := gin.CreateTestContext(httptest.NewRecorder())
++	c.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
++
++	request := &dto.GeneralOpenAIRequest{
++		Model: "MiniMax-M2.7",
++		Tools: []dto.ToolCallRequest{
++			{
++				Type: "function",
++				Function: dto.FunctionRequest{
++					Name: "computer_use_builtin__open_app",
++				},
++			},
++		},
++		Messages: []dto.Message{
++			{
++				Role:    "assistant",
++				Content: "calling tools",
++				ToolCalls: []byte(`[
++{"id":"call_old","type":"function","function":{"name":"computer_use_builtin__command","arguments":"{}"}},
++{"id":"call_ok","type":"function","function":{"name":"computer_use_builtin__open_app","arguments":"{}"}}
++]`),
++			},
++			{
++				Role:       "tool",
++				ToolCallId: "call_old",
++				Content:    "old tool result",
++			},
++			{
++				Role:       "tool",
++				ToolCallId: "call_ok",
++				Content:    "ok tool result",
++			},
++		},
++	}
++
++	applyMiniMaxCompatibility(c, request)
++
++	if len(request.Messages) != 1 {
++		t.Fatalf("expected tool transcript to be flattened with assistant text retained, got %d messages", len(request.Messages))
++	}
++	if request.Messages[0].Role != "assistant" {
++		t.Fatalf("expected remaining message role assistant, got %s", request.Messages[0].Role)
++	}
++	if request.Messages[0].StringContent() != "calling tools" {
++		t.Fatalf("expected remaining assistant text, got %q", request.Messages[0].StringContent())
++	}
++	if len(request.Messages[0].ToolCalls) != 0 {
++		t.Fatalf("expected assistant tool_calls removed from history")
++	}
++}
++
++func TestApplyMiniMaxCompatibility_MergeSystemAndConsecutiveRoles(t *testing.T) {
++	c, _ := gin.CreateTestContext(httptest.NewRecorder())
++	c.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
++
++	request := &dto.GeneralOpenAIRequest{
++		Model: "MiniMax-M2.7",
++		Messages: []dto.Message{
++			{Role: "user", Content: "u1"},
++			{Role: "system", Content: "s1"},
++			{Role: "system", Content: "s2"},
++			{Role: "user", Content: "u2"},
++			{Role: "assistant", Content: "a1"},
++			{Role: "assistant", Content: "a2"},
++		},
++	}
++
++	applyMiniMaxCompatibility(c, request)
++
++	if len(request.Messages) != 3 {
++		t.Fatalf("expected merged message count 3, got %d", len(request.Messages))
++	}
++	if request.Messages[0].Role != "system" {
++		t.Fatalf("expected first message role system, got %s", request.Messages[0].Role)
++	}
++	if got := request.Messages[0].StringContent(); got != "s1\n\ns2" {
++		t.Fatalf("expected merged system content, got %q", got)
++	}
++	if request.Messages[1].Role != "user" {
++		t.Fatalf("expected second message role user, got %s", request.Messages[1].Role)
++	}
++	if got := request.Messages[1].StringContent(); got != "u1\n\nu2" {
++		t.Fatalf("expected merged user content, got %q", got)
++	}
++	if request.Messages[2].Role != "assistant" {
++		t.Fatalf("expected third message role assistant, got %s", request.Messages[2].Role)
++	}
++	if got := request.Messages[2].StringContent(); got != "a1\n\na2" {
++		t.Fatalf("expected merged assistant content, got %q", got)
++	}
++}
++
++func TestShouldRetryMiniMaxDoRequestError(t *testing.T) {
++	tests := []struct {
++		name string
++		err  error
++		want bool
++	}{
++		{
++			name: "connection reset by peer is retryable",
++			err:  errors.New(`Post "https://api.minimax.io/v1/text/chatcompletion_v2": read tcp 127.0.0.1:1->1.1.1.1:443: read: connection reset by peer`),
++			want: true,
++		},
++		{
++			name: "context deadline exceeded is retryable",
++			err:  errors.New("context deadline exceeded"),
++			want: true,
++		},
++		{
++			name: "business error is not retryable",
++			err:  errors.New("invalid params, invalid chat setting"),
++			want: false,
++		},
++		{
++			name: "nil error is not retryable",
++			err:  nil,
++			want: false,
++		},
++	}
++
++	for _, tt := range tests {
++		t.Run(tt.name, func(t *testing.T) {
++			got := shouldRetryMiniMaxDoRequestError(tt.err)
++			if got != tt.want {
++				t.Fatalf("expected %v, got %v", tt.want, got)
++			}
++		})
++	}
++}
+diff --git a/relay/helper/stream_scanner.go b/relay/helper/stream_scanner.go
+index ae70f53c..4ba01fce 100644
+--- a/relay/helper/stream_scanner.go
++++ b/relay/helper/stream_scanner.go
+@@ -60,6 +60,7 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
+ 
+ 	generalSettings := operation_setting.GetGeneralSetting()
+ 	pingEnabled := generalSettings.PingIntervalEnabled && !info.DisablePing
++	isMiniMaxStream := info != nil && info.ChannelType == constant.ChannelTypeMiniMax
+ 	pingInterval := time.Duration(generalSettings.PingIntervalSeconds) * time.Second
+ 	if pingInterval <= 0 {
+ 		pingInterval = DefaultPingInterval
+@@ -225,40 +226,63 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
+ 			}
+ 
+ 			ticker.Reset(streamingTimeout)
+-			data := scanner.Text()
++			rawLine := scanner.Text()
+ 			if common.DebugEnabled {
+-				println(data)
++				println(rawLine)
++			}
++			if isMiniMaxStream {
++				logger.LogInfo(c, "minimax upstream response raw line: "+rawLine)
+ 			}
+ 
+-			if len(data) < 6 {
++			line := strings.TrimSpace(rawLine)
++			if line == "" {
+ 				continue
+ 			}
+-			if data[:5] != "data:" && data[:6] != "[DONE]" {
+-				continue
++
++			if strings.HasPrefix(line, "[DONE]") ||
++				strings.HasPrefix(line, "data:[DONE]") ||
++				strings.HasPrefix(line, "data: [DONE]") {
++				if common.DebugEnabled {
++					println("received [DONE], stopping scanner")
++				}
++				return
+ 			}
+-			data = data[5:]
+-			data = strings.TrimSpace(data)
+-			if data == "" {
++
++			var payload string
++			switch {
++			case strings.HasPrefix(line, "data:"):
++				payload = strings.TrimSpace(strings.TrimPrefix(line, "data:"))
++			case isMiniMaxStream && strings.HasPrefix(line, "{"):
++				// MiniMax occasionally returns newline-delimited JSON without SSE "data:" prefix.
++				payload = line
++				logger.LogInfo(c, "minimax upstream response non-sse json line detected, treating as stream payload")
++			default:
++				if isMiniMaxStream {
++					logger.LogInfo(c, "minimax upstream response line ignored (non-data): "+line)
++				}
+ 				continue
+ 			}
+-			if !strings.HasPrefix(data, "[DONE]") {
+-				info.SetFirstResponseTime()
+-				info.ReceivedResponseCount++
+ 
+-				select {
+-				case dataChan <- data:
+-				case <-ctx.Done():
+-					return
+-				case <-stopChan:
+-					return
+-				}
+-			} else {
+-				// done, 处理完成标志，直接退出停止读取剩余数据防止出错
++			if payload == "" {
++				continue
++			}
++			if strings.HasPrefix(payload, "[DONE]") {
+ 				if common.DebugEnabled {
+ 					println("received [DONE], stopping scanner")
+ 				}
+ 				return
+ 			}
++
++			info.SetFirstResponseTime()
++			info.ReceivedResponseCount++
++
++			select {
++			case dataChan <- payload:
++			case <-ctx.Done():
++				return
++			case <-stopChan:
++				return
++			}
+ 		}
+ 
+ 		if err := scanner.Err(); err != nil {
+diff --git a/router/api-router.go b/router/api-router.go
+index 31ab771a..7e81e202 100644
+--- a/router/api-router.go
++++ b/router/api-router.go
+@@ -284,6 +284,10 @@ func SetApiRouter(router *gin.Engine) {
+ 		logRoute.GET("/", middleware.AdminAuth(), controller.GetAllLogs)
+ 		logRoute.DELETE("/", middleware.AdminAuth(), controller.DeleteHistoryLogs)
+ 		logRoute.GET("/stat", middleware.AdminAuth(), controller.GetLogsStat)
++		logRoute.GET("/usage_report/trend", middleware.AdminAuth(), controller.GetAdminUsageTrend)
++		logRoute.GET("/usage_report/model", middleware.AdminAuth(), controller.GetAdminUsageByModel)
++		logRoute.GET("/usage_report/channel", middleware.AdminAuth(), controller.GetAdminUsageByChannel)
++		logRoute.GET("/usage_report/user", middleware.AdminAuth(), controller.GetAdminUsageByUser)
+ 		logRoute.GET("/self/stat", middleware.UserAuth(), controller.GetLogsSelfStat)
+ 		logRoute.GET("/channel_affinity_usage_cache", middleware.AdminAuth(), controller.GetChannelAffinityUsageCacheStats)
+ 		logRoute.GET("/search", middleware.AdminAuth(), controller.SearchAllLogs)
+diff --git a/start-dev.sh b/start-dev.sh
+new file mode 100755
+index 00000000..62ef5117
+--- /dev/null
++++ b/start-dev.sh
+@@ -0,0 +1,207 @@
++#!/usr/bin/env bash
++set -u
++
++PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
++WEB_DIR="$PROJECT_ROOT/web"
++
++LEGACY_BACKEND_PORT="${BACKEND_PORT-}"
++LEGACY_FRONTEND_PORT="${FRONTEND_PORT-}"
++BACKEND_PORT="${NEW_API_BACKEND_PORT:-3000}"
++FRONTEND_PORT="${NEW_API_FRONTEND_PORT:-5173}"
++BACKEND_CMD="${BACKEND_CMD:-go run main.go --port ${BACKEND_PORT}}"
++FRONTEND_CMD="${FRONTEND_CMD:-}"
++
++EXIT_CODE=0
++STOPPING=0
++BACKEND_WRAPPER_PID=""
++FRONTEND_WRAPPER_PID=""
++FRONTEND_RUNNER=""
++
++is_valid_port() {
++  local port="$1"
++  [[ "$port" =~ ^[0-9]+$ ]] && ((port >= 1 && port <= 65535))
++}
++
++usage() {
++  cat <<EOF
++Usage: ./start-dev.sh [--help]
++
++Start backend and frontend dev servers concurrently with isolated ports.
++
++Environment variables:
++  NEW_API_BACKEND_PORT   Backend listen port (default: 3000)
++  NEW_API_FRONTEND_PORT  Frontend dev server port (default: 5173)
++  BACKEND_CMD    Override backend command
++  FRONTEND_CMD   Override frontend command
++
++Notes:
++  - Backend always runs with PORT=BACKEND_PORT to avoid global PORT pollution.
++  - Generic BACKEND_PORT/FRONTEND_PORT are ignored to avoid cross-project pollution.
++  - Frontend runs with PORT removed from inherited environment (env -u PORT).
++  - If FRONTEND_CMD is not set: prefer bun, fallback to npm.
++
++Examples:
++  PORT=3997 NEW_API_BACKEND_PORT=3000 NEW_API_FRONTEND_PORT=5173 ./start-dev.sh
++  NEW_API_BACKEND_PORT=3100 NEW_API_FRONTEND_PORT=5175 ./start-dev.sh
++  BACKEND_CMD='go run main.go --port 3200' FRONTEND_CMD='npm run dev -- --host 0.0.0.0 --port 5175' ./start-dev.sh
++
++Quick checks for global PORT pollution:
++  1) Current shell value:
++     env | grep -E '^(PORT|BACKEND_PORT|FRONTEND_PORT|NEW_API_BACKEND_PORT|NEW_API_FRONTEND_PORT)='
++  2) Shell startup files:
++     rg -n '(^|[[:space:]])(export[[:space:]]+)?PORT=' ~/.zshrc ~/.zprofile ~/.bashrc ~/.profile 2>/dev/null
++  3) Project env files:
++     rg -n '^PORT=' .env .env.local web/.env web/.env.local 2>/dev/null
++  4) Remove/comment polluted entries and reload shell:
++     exec "\$SHELL" -l
++EOF
++}
++
++if [[ -n "${LEGACY_BACKEND_PORT}" || -n "${LEGACY_FRONTEND_PORT}" ]]; then
++  echo "[dev] detected generic BACKEND_PORT/FRONTEND_PORT in environment; ignoring them to avoid cross-project pollution."
++  echo "[dev] use NEW_API_BACKEND_PORT and NEW_API_FRONTEND_PORT for this project."
++fi
++
++if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
++  usage
++  exit 0
++fi
++
++if [[ ! -d "$WEB_DIR" ]]; then
++  echo "[dev] web directory not found: $WEB_DIR" >&2
++  exit 1
++fi
++
++if ! command -v go >/dev/null 2>&1; then
++  echo "[dev] 'go' is not available in PATH" >&2
++  exit 1
++fi
++
++if ! is_valid_port "$BACKEND_PORT"; then
++  echo "[dev] invalid BACKEND_PORT: $BACKEND_PORT" >&2
++  exit 1
++fi
++if ! is_valid_port "$FRONTEND_PORT"; then
++  echo "[dev] invalid FRONTEND_PORT: $FRONTEND_PORT" >&2
++  exit 1
++fi
++
++if [[ -n "$FRONTEND_CMD" ]]; then
++  FRONTEND_RUNNER="custom"
++else
++  if command -v bun >/dev/null 2>&1; then
++    FRONTEND_CMD="bun run dev --host 0.0.0.0 --port ${FRONTEND_PORT}"
++    FRONTEND_RUNNER="bun"
++  elif command -v npm >/dev/null 2>&1; then
++    FRONTEND_CMD="npm run dev -- --host 0.0.0.0 --port ${FRONTEND_PORT}"
++    FRONTEND_RUNNER="npm"
++  else
++    echo "[dev] neither 'bun' nor 'npm' is available in PATH" >&2
++    exit 1
++  fi
++fi
++
++start_service() {
++  local name="$1"
++  local workdir="$2"
++  local cmd="$3"
++  local mode="$4"
++
++  (
++    set +e
++    cd "$workdir" || exit 1
++
++    case "$mode" in
++      backend)
++        env PORT="$BACKEND_PORT" bash -lc "$cmd" \
++          > >(awk -v prefix="[$name] " '{ print prefix $0; fflush(); }') \
++          2> >(awk -v prefix="[$name] " '{ print prefix $0; fflush(); }' >&2) &
++        ;;
++      frontend)
++        env -u PORT FRONTEND_PORT="$FRONTEND_PORT" bash -lc "$cmd" \
++          > >(awk -v prefix="[$name] " '{ print prefix $0; fflush(); }') \
++          2> >(awk -v prefix="[$name] " '{ print prefix $0; fflush(); }' >&2) &
++        ;;
++      *)
++        bash -lc "$cmd" \
++          > >(awk -v prefix="[$name] " '{ print prefix $0; fflush(); }') \
++          2> >(awk -v prefix="[$name] " '{ print prefix $0; fflush(); }' >&2) &
++        ;;
++    esac
++
++    local child_pid=$!
++    trap 'kill "$child_pid" 2>/dev/null || true; wait "$child_pid" 2>/dev/null || true' INT TERM EXIT
++    wait "$child_pid"
++  ) &
++}
++
++cleanup() {
++  if [[ "$STOPPING" -eq 1 ]]; then
++    return
++  fi
++  STOPPING=1
++
++  echo "[dev] stopping child processes..."
++
++  if [[ -n "$BACKEND_WRAPPER_PID" ]] && kill -0 "$BACKEND_WRAPPER_PID" 2>/dev/null; then
++    kill "$BACKEND_WRAPPER_PID" 2>/dev/null || true
++  fi
++  if [[ -n "$FRONTEND_WRAPPER_PID" ]] && kill -0 "$FRONTEND_WRAPPER_PID" 2>/dev/null; then
++    kill "$FRONTEND_WRAPPER_PID" 2>/dev/null || true
++  fi
++
++  if [[ -n "$BACKEND_WRAPPER_PID" ]]; then
++    wait "$BACKEND_WRAPPER_PID" 2>/dev/null || true
++  fi
++  if [[ -n "$FRONTEND_WRAPPER_PID" ]]; then
++    wait "$FRONTEND_WRAPPER_PID" 2>/dev/null || true
++  fi
++
++  echo "[dev] all child processes stopped"
++}
++
++trap 'EXIT_CODE=130; cleanup' INT
++trap 'EXIT_CODE=143; cleanup' TERM
++trap 'cleanup' EXIT
++
++echo "[dev] project root: $PROJECT_ROOT"
++echo "[dev] backend port: $BACKEND_PORT"
++echo "[dev] frontend port: $FRONTEND_PORT"
++echo "[dev] backend cmd: $BACKEND_CMD"
++echo "[dev] frontend cmd: $FRONTEND_CMD ($FRONTEND_RUNNER)"
++echo "[dev] backend env: PORT=$BACKEND_PORT"
++echo "[dev] frontend env: PORT is unset"
++
++start_service "backend" "$PROJECT_ROOT" "$BACKEND_CMD" "backend"
++BACKEND_WRAPPER_PID="$!"
++start_service "frontend" "$WEB_DIR" "$FRONTEND_CMD" "frontend"
++FRONTEND_WRAPPER_PID="$!"
++
++echo "[dev] backend wrapper pid: $BACKEND_WRAPPER_PID"
++echo "[dev] frontend wrapper pid: $FRONTEND_WRAPPER_PID"
++
++while true; do
++  if [[ "$STOPPING" -eq 1 ]]; then
++    break
++  fi
++
++  if ! kill -0 "$BACKEND_WRAPPER_PID" 2>/dev/null; then
++    if [[ "$STOPPING" -eq 0 ]]; then
++      echo "[dev] backend process exited"
++      EXIT_CODE=1
++    fi
++    break
++  fi
++
++  if ! kill -0 "$FRONTEND_WRAPPER_PID" 2>/dev/null; then
++    if [[ "$STOPPING" -eq 0 ]]; then
++      echo "[dev] frontend process exited"
++      EXIT_CODE=1
++    fi
++    break
++  fi
++
++  sleep 1
++done
++
++exit "$EXIT_CODE"
+diff --git a/web/package.json b/web/package.json
+index 97c7c821..f8495f9a 100644
+--- a/web/package.json
++++ b/web/package.json
+@@ -10,6 +10,7 @@
+     "@visactor/react-vchart": "~1.8.8",
+     "@visactor/vchart": "~1.8.8",
+     "@visactor/vchart-semi-theme": "~1.8.8",
++    "antd": "^5.29.3",
+     "axios": "1.13.5",
+     "clsx": "^2.1.1",
+     "dayjs": "^1.11.11",
+diff --git a/web/src/App.jsx b/web/src/App.jsx
+index a5d1ebc0..a32c5c71 100644
+--- a/web/src/App.jsx
++++ b/web/src/App.jsx
+@@ -36,6 +36,7 @@ import Token from './pages/Token';
+ import Redemption from './pages/Redemption';
+ import TopUp from './pages/TopUp';
+ import Log from './pages/Log';
++import AdminUsageReport from './pages/AdminUsageReport';
+ import Chat from './pages/Chat';
+ import Chat2Link from './pages/Chat2Link';
+ import Midjourney from './pages/Midjourney';
+@@ -285,6 +286,14 @@ function App() {
+             </PrivateRoute>
+           }
+         />
++        <Route
++          path='/console/admin-usage-report'
++          element={
++            <AdminRoute>
++              <AdminUsageReport />
++            </AdminRoute>
++          }
++        />
+         <Route
+           path='/console'
+           element={
+diff --git a/web/src/components/layout/SiderBar.jsx b/web/src/components/layout/SiderBar.jsx
+index bcbe4123..e8037dd6 100644
+--- a/web/src/components/layout/SiderBar.jsx
++++ b/web/src/components/layout/SiderBar.jsx
+@@ -47,6 +47,7 @@ const routerMap = {
+   task: '/console/task',
+   models: '/console/models',
+   deployment: '/console/deployment',
++  usage_report: '/console/admin-usage-report',
+   playground: '/console/playground',
+   personal: '/console/personal',
+ };
+@@ -183,6 +184,12 @@ const SiderBar = ({ onNavigate = () => {} }) => {
+         to: '/user',
+         className: isAdmin() ? '' : 'tableHiddle',
+       },
++      {
++        text: t('全局用量报表'),
++        itemKey: 'usage_report',
++        to: '/admin-usage-report',
++        className: isAdmin() ? '' : 'tableHiddle',
++      },
+       {
+         text: t('系统设置'),
+         itemKey: 'setting',
+diff --git a/web/src/helpers/render.jsx b/web/src/helpers/render.jsx
+index 28da657f..f4e304e6 100644
+--- a/web/src/helpers/render.jsx
++++ b/web/src/helpers/render.jsx
+@@ -89,7 +89,6 @@ import {
+   SiGitlab,
+   SiGoogle,
+   SiKeycloak,
+-  SiLinkedin,
+   SiNextcloud,
+   SiNotion,
+   SiOkta,
+@@ -101,6 +100,7 @@ import {
+   SiWechat,
+   SiX,
+ } from 'react-icons/si';
++import { FaLinkedinIn } from 'react-icons/fa6';
+ 
+ // 获取侧边栏Lucide图标组件
+ export function getLucideIcon(key, selected = false) {
+@@ -504,7 +504,7 @@ const oauthProviderIconMap = {
+   google: SiGoogle,
+   discord: SiDiscord,
+   facebook: SiFacebook,
+-  linkedin: SiLinkedin,
++  linkedin: FaLinkedinIn,
+   x: SiX,
+   twitter: SiX,
+   slack: SiSlack,
+diff --git a/web/src/hooks/common/useSidebar.js b/web/src/hooks/common/useSidebar.js
+index cd74ada2..80571e81 100644
+--- a/web/src/hooks/common/useSidebar.js
++++ b/web/src/hooks/common/useSidebar.js
+@@ -52,6 +52,7 @@ export const DEFAULT_ADMIN_CONFIG = {
+     redemption: true,
+     user: true,
+     subscription: true,
++    usage_report: true,
+     setting: true,
+   },
+ };
+diff --git a/web/src/index.jsx b/web/src/index.jsx
+index 5162b0cb..386ee10a 100644
+--- a/web/src/index.jsx
++++ b/web/src/index.jsx
+@@ -20,7 +20,7 @@ For commercial licensing, please contact support@quantumnous.com
+ import React from 'react';
+ import ReactDOM from 'react-dom/client';
+ import { BrowserRouter } from 'react-router-dom';
+-import '@douyinfe/semi-ui/dist/css/semi.css';
++import '@douyinfe/semi-ui/lib/es/_base/base.css';
+ import { UserProvider } from './context/User';
+ import 'react-toastify/dist/ReactToastify.css';
+ import { StatusProvider } from './context/Status';
+diff --git a/web/src/pages/AdminUsageReport.css b/web/src/pages/AdminUsageReport.css
+new file mode 100644
+index 00000000..6560261b
+--- /dev/null
++++ b/web/src/pages/AdminUsageReport.css
+@@ -0,0 +1,91 @@
++.admin-usage-report {
++  width: 100%;
++  min-width: 0;
++  padding: 4px 0 16px;
++}
++
++.admin-usage-report__stack {
++  width: 100%;
++  min-width: 0;
++  display: flex;
++  flex-direction: column;
++  gap: 16px;
++}
++
++.admin-usage-report__gap-sm {
++  gap: 12px;
++}
++
++.admin-usage-report .semi-card {
++  width: 100%;
++  min-width: 0;
++}
++
++.admin-usage-report .semi-card-header,
++.admin-usage-report .semi-card-body {
++  width: 100%;
++  min-width: 0;
++  padding: 16px !important;
++}
++
++.admin-usage-report .semi-card-body {
++  overflow: visible;
++}
++
++.admin-usage-report__filter-card {
++  position: sticky;
++  top: 8px;
++  z-index: 30;
++  border: 1px solid var(--semi-color-border);
++}
++
++@supports (backdrop-filter: blur(8px)) {
++  .admin-usage-report__filter-card {
++    backdrop-filter: blur(8px);
++    background-color: color-mix(
++      in srgb,
++      var(--semi-color-bg-1) 88%,
++      transparent 12%
++    );
++  }
++}
++
++.admin-usage-report__inline-switch {
++  display: inline-flex;
++  align-items: center;
++  gap: 8px;
++  padding: 3px 10px;
++  border-radius: 999px;
++  border: 1px solid var(--semi-color-border);
++  background: var(--semi-color-fill-0);
++}
++
++.admin-usage-report__chart-box {
++  width: 100%;
++  min-width: 0;
++}
++
++.admin-usage-report__chart-box > div {
++  width: 100% !important;
++  height: 100% !important;
++  min-width: 0;
++}
++
++.admin-usage-report__chart-box canvas {
++  width: 100% !important;
++}
++
++.admin-usage-report .semi-table-wrapper,
++.admin-usage-report .semi-table-container {
++  width: 100%;
++}
++
++@media (max-width: 767px) {
++  .admin-usage-report {
++    padding: 0 0 12px;
++  }
++
++  .admin-usage-report__filter-card {
++    top: 4px;
++  }
++}
+diff --git a/web/src/pages/AdminUsageReport.jsx b/web/src/pages/AdminUsageReport.jsx
+new file mode 100644
+index 00000000..fd734f88
+--- /dev/null
++++ b/web/src/pages/AdminUsageReport.jsx
+@@ -0,0 +1,1550 @@
++/*
++Copyright (C) 2025 QuantumNous
++
++This program is free software: you can redistribute it and/or modify
++it under the terms of the GNU Affero General Public License as
++published by the Free Software Foundation, either version 3 of the
++License, or (at your option) any later version.
++
++This program is distributed in the hope that it will be useful,
++but WITHOUT ANY WARRANTY; without even the implied warranty of
++MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++GNU Affero General Public License for more details.
++
++You should have received a copy of the GNU Affero General Public License
++along with this program. If not, see <https://www.gnu.org/licenses/>.
++
++For commercial licensing, please contact support@quantumnous.com
++*/
++
++import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
++import { useTranslation } from 'react-i18next';
++import { API, renderNumber, renderQuota, showError } from '../helpers';
++import {
++  Banner,
++  Button,
++  Card,
++  Empty,
++  Input,
++  Pagination,
++  Select,
++  Spin,
++  Switch,
++  Table,
++  Tag,
++  Typography,
++} from '@douyinfe/semi-ui';
++import { VChart } from '@visactor/react-vchart';
++import { CHART_CONFIG } from '../constants/dashboard.constants';
++import './AdminUsageReport.css';
++
++const DEFAULT_PAGE_SIZE = 20;
++const FULL_WIDTH_STYLE = { width: '100%' };
++const FULL_CHART_STYLE = { width: '100%', height: '100%' };
++
++const QUICK_RANGES = [
++  { key: '24h', days: 1, label: '最近24小时' },
++  { key: '7d', days: 7, label: '最近7天' },
++  { key: '30d', days: 30, label: '最近30天' },
++];
++
++const BUCKET_OPTIONS = [
++  { label: '1小时', value: 3600 },
++  { label: '6小时', value: 21600 },
++  { label: '1天', value: 86400 },
++];
++
++const MODEL_TOP_N_OPTIONS = [
++  { label: 'Top 5', value: 5 },
++  { label: 'Top 8', value: 8 },
++  { label: 'Top 10', value: 10 },
++  { label: 'Top 12', value: 12 },
++];
++
++const MODEL_SORT_FIELD_OPTIONS = [
++  { label: '按 Token', value: 'token_used' },
++  { label: '按请求数', value: 'request_count' },
++  { label: '按配额', value: 'quota' },
++];
++
++const MODEL_LABEL_MAX_LENGTH = 18;
++
++const toNumber = (value) => {
++  const num = Number(value);
++  return Number.isFinite(num) ? num : 0;
++};
++
++const normalizeModelName = (value) => {
++  const text = typeof value === 'string' ? value.trim() : '';
++  return text || '未命名模型';
++};
++
++const normalizeChannelName = (channelId, channelName) => {
++  const name = typeof channelName === 'string' ? channelName.trim() : '';
++  if (name) {
++    return name;
++  }
++  if (toNumber(channelId) > 0) {
++    return `#${channelId}`;
++  }
++  return '未分配渠道';
++};
++
++const unwrapData = (response) => response?.data?.data || {};
++
++const getRangeByDays = (days) => {
++  const end = Math.floor(Date.now() / 1000);
++  return {
++    start: end - days * 24 * 3600,
++    end,
++  };
++};
++
++const getPreviousRange = (startTimestamp, endTimestamp) => {
++  const start = Math.max(1, toNumber(startTimestamp));
++  const end = Math.max(start, toNumber(endTimestamp));
++  const span = Math.max(1, end - start + 1);
++  const previousEnd = Math.max(1, start - 1);
++  return {
++    start: Math.max(1, previousEnd - span + 1),
++    end: previousEnd,
++  };
++};
++
++const getRecommendedBucketSeconds = (days) => {
++  if (days <= 7) {
++    return 3600;
++  }
++  if (days <= 30) {
++    return 21600;
++  }
++  return 86400;
++};
++
++const formatTimestamp = (timestamp) => {
++  if (!timestamp) {
++    return '-';
++  }
++  return new Date(toNumber(timestamp) * 1000).toLocaleString();
++};
++
++const formatBucketLabel = (timestamp, bucketSeconds) => {
++  const date = new Date(toNumber(timestamp) * 1000);
++  if (bucketSeconds >= 86400) {
++    return date.toLocaleDateString();
++  }
++  const month = String(date.getMonth() + 1).padStart(2, '0');
++  const day = String(date.getDate()).padStart(2, '0');
++  const hours = String(date.getHours()).padStart(2, '0');
++  const minutes = String(date.getMinutes()).padStart(2, '0');
++  return `${month}-${day} ${hours}:${minutes}`;
++};
++
++const trimToFilterValue = (value) => {
++  if (typeof value !== 'string') {
++    return '';
++  }
++  return value.trim();
++};
++
++const formatRate = (value) => `${toNumber(value).toFixed(2)}%`;
++
++const getAxisModelLabel = (value) => {
++  const text = String(value || '');
++  if (text.length <= MODEL_LABEL_MAX_LENGTH) {
++    return text;
++  }
++  return `${text.slice(0, MODEL_LABEL_MAX_LENGTH)}...`;
++};
++
++const getSortMetricValue = (item, metric) => {
++  if (!item || !metric) {
++    return 0;
++  }
++  return toNumber(item[metric]);
++};
++
++const MetricCard = ({ title, value, hint = '', tagColor = 'blue' }) => (
++  <div className='rounded-md border border-[var(--semi-color-border)] bg-[var(--semi-color-bg-0)] p-3'>
++    <div className='flex items-center justify-between'>
++      <Typography.Text type='tertiary' size='small'>
++        {title}
++      </Typography.Text>
++      {hint ? <Tag color={tagColor}>{hint}</Tag> : null}
++    </div>
++    <Typography.Title heading={4} style={{ margin: '8px 0 0' }}>
++      {value}
++    </Typography.Title>
++  </div>
++);
++
++const ChartBox = ({ spec, height = 360 }) => (
++  <div className='admin-usage-report__chart-box' style={{ height }}>
++    <VChart spec={spec} option={CHART_CONFIG} style={FULL_CHART_STYLE} />
++  </div>
++);
++
++const AdminUsageReport = () => {
++  const { t } = useTranslation();
++
++  const defaultRange = useMemo(() => getRangeByDays(1), []);
++
++  const [quickRangeKey, setQuickRangeKey] = useState('24h');
++  const [startTimestamp, setStartTimestamp] = useState(defaultRange.start);
++  const [endTimestamp, setEndTimestamp] = useState(defaultRange.end);
++  const [bucketSeconds, setBucketSeconds] = useState(3600);
++
++  const [selectedModel, setSelectedModel] = useState('');
++  const [selectedChannel, setSelectedChannel] = useState('');
++  const [selectedGroup, setSelectedGroup] = useState('');
++  const [userKeyword, setUserKeyword] = useState('');
++
++  const [compareEnabled, setCompareEnabled] = useState(false);
++  const [modelTrendTopN, setModelTrendTopN] = useState(8);
++  const [modelTrendSortBy, setModelTrendSortBy] = useState('token_used');
++
++  const [page, setPage] = useState(1);
++  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
++  const [sortBy, setSortBy] = useState('request_count');
++  const [sortOrder, setSortOrder] = useState('desc');
++
++  const [loading, setLoading] = useState(false);
++  const [errorMessage, setErrorMessage] = useState('');
++
++  const [groupOptions, setGroupOptions] = useState([{ label: '全部分组', value: '' }]);
++  const [statData, setStatData] = useState({ quota: 0, rpm: 0, tpm: 0 });
++  const [trendItems, setTrendItems] = useState([]);
++  const [compareTrendItems, setCompareTrendItems] = useState([]);
++  const [modelTrendItems, setModelTrendItems] = useState([]);
++  const [modelItems, setModelItems] = useState([]);
++  const [channelItems, setChannelItems] = useState([]);
++  const [userItems, setUserItems] = useState([]);
++  const [userTotal, setUserTotal] = useState(0);
++
++  const requestSeqRef = useRef(0);
++  const didInitRef = useRef(false);
++
++  const loadGroups = useCallback(async () => {
++    try {
++      const response = await API.get('/api/group/');
++      const data = Array.isArray(response?.data?.data) ? response.data.data : [];
++      const nextOptions = [
++        { label: t('全部分组'), value: '' },
++        ...data.map((group) => {
++          const value = trimToFilterValue(group);
++          return {
++            label: value || t('默认分组'),
++            value,
++          };
++        }),
++      ];
++      setGroupOptions(nextOptions);
++    } catch {
++      setGroupOptions([{ label: t('全部分组'), value: '' }]);
++    }
++  }, [t]);
++
++  const queryReport = useCallback(
++    async ({
++      queryStartTimestamp,
++      queryEndTimestamp,
++      queryBucketSeconds,
++      queryModel,
++      queryChannel,
++      queryGroup,
++      queryUserKeyword,
++      queryCompareEnabled,
++      queryModelTrendTopN,
++      queryModelTrendSortBy,
++      queryPage,
++      queryPageSize,
++      querySortBy,
++      querySortOrder,
++    }) => {
++      const normalizedStart = toNumber(queryStartTimestamp);
++      const normalizedEnd = toNumber(queryEndTimestamp);
++      const normalizedBucket = toNumber(queryBucketSeconds) > 0 ? toNumber(queryBucketSeconds) : 3600;
++      const normalizedPage = Math.max(1, toNumber(queryPage));
++      const normalizedPageSize = Math.max(1, toNumber(queryPageSize));
++      const normalizedChannel = toNumber(queryChannel);
++      const normalizedTopN = Math.min(20, Math.max(1, toNumber(queryModelTrendTopN) || 8));
++      const trimmedModel = trimToFilterValue(queryModel);
++      const trimmedGroup = trimToFilterValue(queryGroup);
++      const trimmedUserKeyword = trimToFilterValue(queryUserKeyword);
++      const shouldCompare = !!queryCompareEnabled;
++
++      if (normalizedStart <= 0 || normalizedEnd <= 0) {
++        showError(t('开始/结束时间戳必须大于 0'));
++        return;
++      }
++      if (normalizedStart > normalizedEnd) {
++        showError(t('开始时间不能大于结束时间'));
++        return;
++      }
++
++      const requestSeq = ++requestSeqRef.current;
++      setLoading(true);
++      setErrorMessage('');
++
++      try {
++        const sharedParams = {
++          start_timestamp: normalizedStart,
++          end_timestamp: normalizedEnd,
++        };
++        if (trimmedModel) {
++          sharedParams.model_name = trimmedModel;
++        }
++        if (normalizedChannel > 0) {
++          sharedParams.channel = normalizedChannel;
++        }
++        if (trimmedGroup) {
++          sharedParams.group = trimmedGroup;
++        }
++
++        const userParams = {
++          ...sharedParams,
++          p: normalizedPage - 1,
++          page_size: normalizedPageSize,
++          sort_by: querySortBy,
++          sort_order: querySortOrder,
++        };
++        if (trimmedUserKeyword) {
++          userParams.user_keyword = trimmedUserKeyword;
++        }
++
++        const [trendRes, modelRes, channelRes, userRes, statRes] = await Promise.all([
++          API.get('/api/log/usage_report/trend', {
++            params: {
++              ...sharedParams,
++              bucket_seconds: normalizedBucket,
++            },
++          }),
++          API.get('/api/log/usage_report/model', {
++            params: {
++              ...sharedParams,
++              limit: 200,
++            },
++          }),
++          API.get('/api/log/usage_report/channel', {
++            params: {
++              ...sharedParams,
++              limit: 200,
++            },
++          }),
++          API.get('/api/log/usage_report/user', {
++            params: userParams,
++          }),
++          API.get('/api/log/stat', {
++            params: sharedParams,
++          }),
++        ]);
++
++        if (requestSeq !== requestSeqRef.current) {
++          return;
++        }
++
++        const trendData = unwrapData(trendRes);
++        const modelData = unwrapData(modelRes);
++        const channelData = unwrapData(channelRes);
++        const userData = unwrapData(userRes);
++        const stat = unwrapData(statRes);
++
++        const nextTrendItems = Array.isArray(trendData.items) ? trendData.items : [];
++        const nextModelItems = Array.isArray(modelData.items) ? modelData.items : [];
++        const nextChannelItems = Array.isArray(channelData.items) ? channelData.items : [];
++        const nextUserItems = Array.isArray(userData.items) ? userData.items : [];
++
++        setTrendItems(nextTrendItems);
++        setModelItems(nextModelItems);
++        setChannelItems(nextChannelItems);
++        setUserItems(nextUserItems);
++
++        const totalFromResponse = toNumber(userData.total);
++        setUserTotal(totalFromResponse > 0 ? totalFromResponse : nextUserItems.length);
++
++        setStatData({
++          quota: toNumber(stat.quota),
++          rpm: toNumber(stat.rpm),
++          tpm: toNumber(stat.tpm),
++        });
++
++        const sortedModelItems = [...nextModelItems].sort((a, b) => {
++          return getSortMetricValue(b, queryModelTrendSortBy) - getSortMetricValue(a, queryModelTrendSortBy);
++        });
++
++        const topModelNames = trimmedModel
++          ? [trimmedModel]
++          : sortedModelItems
++              .map((item) => trimToFilterValue(item.model_name))
++              .filter(Boolean)
++              .slice(0, normalizedTopN);
++
++        const comparePromise = shouldCompare
++          ? (() => {
++              const previousRange = getPreviousRange(normalizedStart, normalizedEnd);
++              return API.get('/api/log/usage_report/trend', {
++                params: {
++                  ...sharedParams,
++                  start_timestamp: previousRange.start,
++                  end_timestamp: previousRange.end,
++                  bucket_seconds: normalizedBucket,
++                },
++              });
++            })()
++          : Promise.resolve(null);
++
++        const modelTrendPromise = topModelNames.length
++          ? Promise.all(
++              topModelNames.map((modelName) =>
++                API.get('/api/log/usage_report/trend', {
++                  params: {
++                    ...sharedParams,
++                    model_name: modelName,
++                    bucket_seconds: normalizedBucket,
++                  },
++                }).then((response) => {
++                  const data = unwrapData(response);
++                  return {
++                    modelName,
++                    items: Array.isArray(data.items) ? data.items : [],
++                  };
++                }),
++              ),
++            )
++          : Promise.resolve([]);
++
++        const [compareRes, modelTrendResponses] = await Promise.all([comparePromise, modelTrendPromise]);
++
++        if (requestSeq !== requestSeqRef.current) {
++          return;
++        }
++
++        const compareData = compareRes ? unwrapData(compareRes) : {};
++        const nextCompareTrendItems = Array.isArray(compareData.items) ? compareData.items : [];
++        setCompareTrendItems(shouldCompare ? nextCompareTrendItems : []);
++
++        const mergedModelTrendItems = modelTrendResponses.flatMap((entry) => {
++          const modelName = normalizeModelName(entry.modelName);
++          return entry.items.map((item) => ({
++            timestamp: toNumber(item.timestamp),
++            model_name: modelName,
++            request_count: toNumber(item.request_count),
++            success_count: toNumber(item.success_count),
++            error_count: toNumber(item.error_count),
++            quota: toNumber(item.quota),
++            token_used: toNumber(item.token_used),
++          }));
++        });
++
++        setModelTrendItems(mergedModelTrendItems);
++      } catch (error) {
++        if (requestSeq !== requestSeqRef.current) {
++          return;
++        }
++
++        const msg = error?.response?.data?.message || error?.message || t('请求失败');
++        setErrorMessage(msg);
++        setTrendItems([]);
++        setCompareTrendItems([]);
++        setModelItems([]);
++        setModelTrendItems([]);
++        setChannelItems([]);
++        setUserItems([]);
++        setUserTotal(0);
++        setStatData({ quota: 0, rpm: 0, tpm: 0 });
++        showError(msg);
++      } finally {
++        if (requestSeq === requestSeqRef.current) {
++          setLoading(false);
++        }
++      }
++    },
++    [t],
++  );
++
++  const runQuery = useCallback(
++    ({
++      nextStartTimestamp = startTimestamp,
++      nextEndTimestamp = endTimestamp,
++      nextBucketSeconds = bucketSeconds,
++      nextSelectedModel = selectedModel,
++      nextSelectedChannel = selectedChannel,
++      nextSelectedGroup = selectedGroup,
++      nextUserKeyword = userKeyword,
++      nextCompareEnabled = compareEnabled,
++      nextModelTrendTopN = modelTrendTopN,
++      nextModelTrendSortBy = modelTrendSortBy,
++      nextPage = page,
++      nextPageSize = pageSize,
++      nextSortBy = sortBy,
++      nextSortOrder = sortOrder,
++    } = {}) => {
++      queryReport({
++        queryStartTimestamp: nextStartTimestamp,
++        queryEndTimestamp: nextEndTimestamp,
++        queryBucketSeconds: nextBucketSeconds,
++        queryModel: nextSelectedModel,
++        queryChannel: nextSelectedChannel,
++        queryGroup: nextSelectedGroup,
++        queryUserKeyword: nextUserKeyword,
++        queryCompareEnabled: nextCompareEnabled,
++        queryModelTrendTopN: nextModelTrendTopN,
++        queryModelTrendSortBy: nextModelTrendSortBy,
++        queryPage: nextPage,
++        queryPageSize: nextPageSize,
++        querySortBy: nextSortBy,
++        querySortOrder: nextSortOrder,
++      });
++    },
++    [
++      startTimestamp,
++      endTimestamp,
++      bucketSeconds,
++      selectedModel,
++      selectedChannel,
++      selectedGroup,
++      userKeyword,
++      compareEnabled,
++      modelTrendTopN,
++      modelTrendSortBy,
++      page,
++      pageSize,
++      sortBy,
++      sortOrder,
++      queryReport,
++    ],
++  );
++
++  useEffect(() => {
++    loadGroups();
++  }, [loadGroups]);
++
++  useEffect(() => {
++    if (didInitRef.current) {
++      return;
++    }
++    didInitRef.current = true;
++    runQuery();
++  }, [runQuery]);
++
++  const handleQuickRange = (key, days) => {
++    const range = getRangeByDays(days);
++    const recommendedBucket = getRecommendedBucketSeconds(days);
++    setQuickRangeKey(key);
++    setStartTimestamp(range.start);
++    setEndTimestamp(range.end);
++    setBucketSeconds(recommendedBucket);
++    setPage(1);
++    runQuery({
++      nextStartTimestamp: range.start,
++      nextEndTimestamp: range.end,
++      nextBucketSeconds: recommendedBucket,
++      nextPage: 1,
++    });
++  };
++
++  const handleRefresh = () => {
++    runQuery();
++  };
++
++  const handleFilterSearch = () => {
++    setPage(1);
++    runQuery({ nextPage: 1 });
++  };
++
++  const handleReset = () => {
++    const range = getRangeByDays(1);
++    setQuickRangeKey('24h');
++    setStartTimestamp(range.start);
++    setEndTimestamp(range.end);
++    setBucketSeconds(3600);
++    setSelectedModel('');
++    setSelectedChannel('');
++    setSelectedGroup('');
++    setUserKeyword('');
++    setCompareEnabled(false);
++    setModelTrendTopN(8);
++    setModelTrendSortBy('token_used');
++    setPage(1);
++    setPageSize(DEFAULT_PAGE_SIZE);
++    setSortBy('request_count');
++    setSortOrder('desc');
++
++    runQuery({
++      nextStartTimestamp: range.start,
++      nextEndTimestamp: range.end,
++      nextBucketSeconds: 3600,
++      nextSelectedModel: '',
++      nextSelectedChannel: '',
++      nextSelectedGroup: '',
++      nextUserKeyword: '',
++      nextCompareEnabled: false,
++      nextModelTrendTopN: 8,
++      nextModelTrendSortBy: 'token_used',
++      nextPage: 1,
++      nextPageSize: DEFAULT_PAGE_SIZE,
++      nextSortBy: 'request_count',
++      nextSortOrder: 'desc',
++    });
++  };
++
++  const handleModelDrillDown = useCallback((modelName) => {
++    const normalizedModel = trimToFilterValue(modelName);
++    if (!normalizedModel) {
++      return;
++    }
++    setSelectedModel(normalizedModel);
++    setPage(1);
++    runQuery({
++      nextSelectedModel: normalizedModel,
++      nextPage: 1,
++    });
++  }, [runQuery]);
++
++  const handlePageChange = (nextPage) => {
++    setPage(nextPage);
++    runQuery({ nextPage });
++  };
++
++  const handlePageSizeChange = (nextPageSize) => {
++    setPageSize(nextPageSize);
++    setPage(1);
++    runQuery({ nextPage: 1, nextPageSize });
++  };
++
++  const handleSortFieldChange = (nextSortBy) => {
++    setSortBy(nextSortBy);
++    setPage(1);
++    runQuery({ nextSortBy, nextPage: 1 });
++  };
++
++  const handleSortOrderChange = (nextSortOrder) => {
++    setSortOrder(nextSortOrder);
++    setPage(1);
++    runQuery({ nextSortOrder, nextPage: 1 });
++  };
++
++  const trendTimeline = useMemo(
++    () =>
++      trendItems
++        .map((item) => {
++          const requestCount = toNumber(item.request_count);
++          const errorCount = toNumber(item.error_count);
++          return {
++            timestamp: toNumber(item.timestamp),
++            time: formatBucketLabel(item.timestamp, bucketSeconds),
++            request_count: requestCount,
++            success_count: toNumber(item.success_count),
++            error_count: errorCount,
++            quota: toNumber(item.quota),
++            token_used: toNumber(item.token_used),
++            error_rate: requestCount > 0 ? (errorCount * 100) / requestCount : 0,
++          };
++        })
++        .sort((a, b) => a.timestamp - b.timestamp),
++    [trendItems, bucketSeconds],
++  );
++
++  const compareTrendTimeline = useMemo(
++    () =>
++      compareTrendItems
++        .map((item) => ({
++          timestamp: toNumber(item.timestamp),
++          time: formatBucketLabel(item.timestamp, bucketSeconds),
++          request_count: toNumber(item.request_count),
++          success_count: toNumber(item.success_count),
++          error_count: toNumber(item.error_count),
++          quota: toNumber(item.quota),
++          token_used: toNumber(item.token_used),
++        }))
++        .sort((a, b) => a.timestamp - b.timestamp),
++    [compareTrendItems, bucketSeconds],
++  );
++
++  const overview = useMemo(() => {
++    const result = {
++      request_count: 0,
++      success_count: 0,
++      error_count: 0,
++      quota: 0,
++      token_used: 0,
++    };
++
++    trendTimeline.forEach((item) => {
++      result.request_count += item.request_count;
++      result.success_count += item.success_count;
++      result.error_count += item.error_count;
++      result.quota += item.quota;
++      result.token_used += item.token_used;
++    });
++
++    const requestBase = result.request_count > 0 ? result.request_count : 1;
++    const successRate = result.request_count > 0 ? (result.success_count * 100) / requestBase : 0;
++    const errorRate = result.request_count > 0 ? (result.error_count * 100) / requestBase : 0;
++
++    return {
++      ...result,
++      success_rate: successRate,
++      error_rate: errorRate,
++      active_model_count: modelItems.length,
++      active_user_count: userTotal,
++      rpm: statData.rpm,
++      tpm: statData.tpm,
++    };
++  }, [trendTimeline, modelItems.length, userTotal, statData.rpm, statData.tpm]);
++
++  const tokenTrendChartData = useMemo(() => {
++    const currentLabel = compareEnabled ? t('当前周期 Token') : t('Token 用量');
++    const previousLabel = t('上周期 Token');
++
++    const data = trendTimeline.map((item) => ({
++      time: item.time,
++      metric: currentLabel,
++      value: item.token_used,
++    }));
++
++    if (!compareEnabled || compareTrendTimeline.length === 0) {
++      return data;
++    }
++
++    trendTimeline.forEach((item, index) => {
++      data.push({
++        time: item.time,
++        metric: previousLabel,
++        value: toNumber(compareTrendTimeline[index]?.token_used),
++      });
++    });
++
++    return data;
++  }, [trendTimeline, compareTrendTimeline, compareEnabled, t]);
++
++  const quotaTrendChartData = useMemo(() => {
++    const currentLabel = compareEnabled ? t('当前周期配额') : t('配额消耗');
++    const previousLabel = t('上周期配额');
++
++    const data = trendTimeline.map((item) => ({
++      time: item.time,
++      metric: currentLabel,
++      value: item.quota,
++    }));
++
++    if (!compareEnabled || compareTrendTimeline.length === 0) {
++      return data;
++    }
++
++    trendTimeline.forEach((item, index) => {
++      data.push({
++        time: item.time,
++        metric: previousLabel,
++        value: toNumber(compareTrendTimeline[index]?.quota),
++      });
++    });
++
++    return data;
++  }, [trendTimeline, compareTrendTimeline, compareEnabled, t]);
++
++  const requestTrendChartData = useMemo(
++    () =>
++      trendTimeline.flatMap((item) => [
++        {
++          time: item.time,
++          metric: t('总请求'),
++          value: item.request_count,
++        },
++        {
++          time: item.time,
++          metric: t('成功请求'),
++          value: item.success_count,
++        },
++        {
++          time: item.time,
++          metric: t('错误请求'),
++          value: item.error_count,
++        },
++      ]),
++    [trendTimeline, t],
++  );
++
++  const modelTrendChartData = useMemo(
++    () =>
++      modelTrendItems
++        .map((item) => ({
++          time: formatBucketLabel(item.timestamp, bucketSeconds),
++          timestamp: item.timestamp,
++          model_name: normalizeModelName(item.model_name),
++          token_used: toNumber(item.token_used),
++        }))
++        .sort((a, b) => a.timestamp - b.timestamp),
++    [modelTrendItems, bucketSeconds],
++  );
++
++  const sortedModelItems = useMemo(
++    () =>
++      [...modelItems].sort(
++        (a, b) => getSortMetricValue(b, modelTrendSortBy) - getSortMetricValue(a, modelTrendSortBy),
++      ),
++    [modelItems, modelTrendSortBy],
++  );
++
++  const modelSummaryChartData = useMemo(
++    () =>
++      sortedModelItems.slice(0, 12).flatMap((item, index) => {
++        const modelName = normalizeModelName(item.model_name || t('未命名模型'));
++        return [
++          {
++            key: `${modelName}-request-${index}`,
++            model_name: modelName,
++            metric: t('请求次数'),
++            value: toNumber(item.request_count),
++          },
++          {
++            key: `${modelName}-token-${index}`,
++            model_name: modelName,
++            metric: t('Token 用量'),
++            value: toNumber(item.token_used),
++          },
++        ];
++      }),
++    [sortedModelItems, t],
++  );
++
++  const channelChartData = useMemo(
++    () =>
++      channelItems.slice(0, 12).map((item, index) => ({
++        key: `${item.channel_id || 0}-${index}`,
++        channel_name: normalizeChannelName(item.channel_id, item.channel_name),
++        request_count: toNumber(item.request_count),
++        token_used: toNumber(item.token_used),
++        quota: toNumber(item.quota),
++      })),
++    [channelItems],
++  );
++
++  const modelOptions = useMemo(() => {
++    const options = [{ label: t('全部模型'), value: '' }];
++    const seen = new Set(['']);
++    modelItems.forEach((item) => {
++      const rawName = trimToFilterValue(item.model_name);
++      if (!rawName || seen.has(rawName)) {
++        return;
++      }
++      seen.add(rawName);
++      options.push({ label: rawName, value: rawName });
++    });
++    return options;
++  }, [modelItems, t]);
++
++  const channelOptions = useMemo(() => {
++    const options = [{ label: t('全部渠道'), value: '' }];
++    const seen = new Set(['']);
++    channelItems.forEach((item) => {
++      const value = String(toNumber(item.channel_id));
++      if (value === '0' || seen.has(value)) {
++        return;
++      }
++      seen.add(value);
++      options.push({
++        label: normalizeChannelName(item.channel_id, item.channel_name),
++        value,
++      });
++    });
++    return options;
++  }, [channelItems, t]);
++
++  const sortFieldOptions = useMemo(
++    () => [
++      { label: t('请求数'), value: 'request_count' },
++      { label: t('Token 用量'), value: 'token_used' },
++      { label: t('费用/配额'), value: 'quota' },
++      { label: t('成功数'), value: 'success_count' },
++      { label: t('错误数'), value: 'error_count' },
++      { label: t('用户 ID'), value: 'user_id' },
++      { label: t('用户名'), value: 'username' },
++    ],
++    [t],
++  );
++
++  const sortOrderOptions = useMemo(
++    () => [
++      { label: t('降序'), value: 'desc' },
++      { label: t('升序'), value: 'asc' },
++    ],
++    [t],
++  );
++
++  const tokenTrendSpec = useMemo(
++    () => ({
++      type: 'line',
++      autoFit: true,
++      data: [{ id: 'token_trend', values: tokenTrendChartData }],
++      xField: 'time',
++      yField: 'value',
++      seriesField: 'metric',
++      legends: { visible: true, orient: 'top' },
++      tooltip: { visible: true },
++      axes: [
++        { orient: 'bottom', title: { visible: true, text: t('时间') } },
++        {
++          orient: 'left',
++          title: { visible: true, text: t('Token 用量') },
++          nice: true,
++        },
++      ],
++      line: {
++        style: {
++          lineWidth: 2,
++          lineDash: (datum) => (String(datum.metric).includes(t('上周期')) ? [6, 4] : [0, 0]),
++        },
++      },
++      point: { visible: false },
++    }),
++    [tokenTrendChartData, t],
++  );
++
++  const quotaTrendSpec = useMemo(
++    () => ({
++      type: 'line',
++      autoFit: true,
++      data: [{ id: 'quota_trend', values: quotaTrendChartData }],
++      xField: 'time',
++      yField: 'value',
++      seriesField: 'metric',
++      legends: { visible: true, orient: 'top' },
++      tooltip: { visible: true },
++      axes: [
++        { orient: 'bottom', title: { visible: true, text: t('时间') } },
++        {
++          orient: 'left',
++          title: { visible: true, text: t('配额') },
++          nice: true,
++        },
++      ],
++      line: {
++        style: {
++          lineWidth: 2,
++          lineDash: (datum) => (String(datum.metric).includes(t('上周期')) ? [6, 4] : [0, 0]),
++        },
++      },
++      point: { visible: false },
++    }),
++    [quotaTrendChartData, t],
++  );
++
++  const requestTrendSpec = useMemo(
++    () => ({
++      type: 'line',
++      autoFit: true,
++      data: [{ id: 'request_trend', values: requestTrendChartData }],
++      xField: 'time',
++      yField: 'value',
++      seriesField: 'metric',
++      legends: { visible: true, orient: 'top' },
++      tooltip: { visible: true },
++      axes: [
++        { orient: 'bottom', title: { visible: true, text: t('时间') } },
++        {
++          orient: 'left',
++          title: { visible: true, text: t('请求量') },
++          nice: true,
++        },
++      ],
++      line: { style: { lineWidth: 2 } },
++      point: { visible: false },
++    }),
++    [requestTrendChartData, t],
++  );
++
++  const modelTrendSpec = useMemo(
++    () => ({
++      type: 'line',
++      autoFit: true,
++      data: [{ id: 'model_token_trend', values: modelTrendChartData }],
++      xField: 'time',
++      yField: 'token_used',
++      seriesField: 'model_name',
++      legends: {
++        visible: true,
++        orient: 'top',
++      },
++      tooltip: { visible: true },
++      axes: [
++        { orient: 'bottom', title: { visible: true, text: t('时间') } },
++        {
++          orient: 'left',
++          title: { visible: true, text: t('Token 用量') },
++          nice: true,
++        },
++      ],
++      line: { style: { lineWidth: 2 } },
++      point: { visible: false },
++    }),
++    [modelTrendChartData, t],
++  );
++
++  const modelSummarySpec = useMemo(
++    () => ({
++      type: 'bar',
++      autoFit: true,
++      data: [{ id: 'model_summary', values: modelSummaryChartData }],
++      xField: 'model_name',
++      yField: 'value',
++      seriesField: 'metric',
++      legends: {
++        visible: true,
++        orient: 'top',
++      },
++      axes: [
++        {
++          orient: 'bottom',
++          title: { visible: true, text: t('模型') },
++          label: {
++            formatter: (value) => getAxisModelLabel(value),
++            style: {
++              angle: -30,
++              textAlign: 'right',
++              textBaseline: 'top',
++            },
++          },
++        },
++        {
++          orient: 'left',
++          title: {
++            visible: true,
++            text: t('请求 / Token'),
++          },
++          nice: true,
++        },
++      ],
++    }),
++    [modelSummaryChartData, t],
++  );
++
++  const channelSpec = useMemo(
++    () => ({
++      type: 'bar',
++      autoFit: true,
++      data: [{ id: 'channel_dist', values: channelChartData }],
++      xField: 'channel_name',
++      yField: 'token_used',
++      legends: { visible: false },
++      tooltip: { visible: true },
++      axes: [
++        {
++          orient: 'bottom',
++          title: { visible: true, text: t('渠道') },
++          label: {
++            style: {
++              angle: -25,
++              textAlign: 'right',
++              textBaseline: 'top',
++            },
++          },
++        },
++        {
++          orient: 'left',
++          title: { visible: true, text: t('Token 用量') },
++          nice: true,
++        },
++      ],
++    }),
++    [channelChartData, t],
++  );
++
++  const modelColumns = useMemo(
++    () => [
++      {
++        title: t('模型'),
++        dataIndex: 'model_name',
++        render: (value) => (
++          <Button
++            type='tertiary'
++            theme='borderless'
++            size='small'
++            onClick={() => handleModelDrillDown(value)}
++          >
++            {normalizeModelName(value)}
++          </Button>
++        ),
++      },
++      {
++        title: t('请求数'),
++        dataIndex: 'request_count',
++        align: 'right',
++        render: (value) => renderNumber(value),
++      },
++      {
++        title: t('Token 用量'),
++        dataIndex: 'token_used',
++        align: 'right',
++        render: (value) => renderNumber(value),
++      },
++      {
++        title: t('费用/配额'),
++        dataIndex: 'quota',
++        align: 'right',
++        render: (value) => renderQuota(value, 6),
++      },
++      {
++        title: t('成功率'),
++        dataIndex: 'success_rate',
++        align: 'center',
++        render: (value) => <Tag color='green'>{formatRate(value)}</Tag>,
++      },
++      {
++        title: t('错误率'),
++        dataIndex: 'error_rate',
++        align: 'center',
++        render: (value) => <Tag color='red'>{formatRate(value)}</Tag>,
++      },
++    ],
++    [t, handleModelDrillDown],
++  );
++
++  const userColumns = useMemo(
++    () => [
++      { title: t('用户 ID'), dataIndex: 'user_id', width: 100, align: 'center' },
++      {
++        title: t('用户名'),
++        dataIndex: 'username',
++        width: 180,
++        render: (value) => value || '-',
++      },
++      {
++        title: t('请求数'),
++        dataIndex: 'request_count',
++        width: 120,
++        align: 'right',
++        render: (value) => renderNumber(value),
++      },
++      {
++        title: t('Token 用量'),
++        dataIndex: 'token_used',
++        width: 140,
++        align: 'right',
++        render: (value) => renderNumber(value),
++      },
++      {
++        title: t('费用/配额'),
++        dataIndex: 'quota',
++        width: 140,
++        align: 'right',
++        render: (value) => renderQuota(value, 6),
++      },
++      {
++        title: t('成功率'),
++        dataIndex: 'success_rate',
++        width: 100,
++        align: 'center',
++        render: (value) => <Tag color='green'>{formatRate(value)}</Tag>,
++      },
++      {
++        title: t('错误率'),
++        dataIndex: 'error_rate',
++        width: 100,
++        align: 'center',
++        render: (value) => <Tag color='red'>{formatRate(value)}</Tag>,
++      },
++    ],
++    [t],
++  );
++
++  const channelColumns = useMemo(
++    () => [
++      {
++        title: t('渠道'),
++        dataIndex: 'channel_name',
++        render: (_, record) => normalizeChannelName(record.channel_id, record.channel_name),
++      },
++      {
++        title: t('请求数'),
++        dataIndex: 'request_count',
++        align: 'right',
++        render: (value) => renderNumber(value),
++      },
++      {
++        title: t('Token 用量'),
++        dataIndex: 'token_used',
++        align: 'right',
++        render: (value) => renderNumber(value),
++      },
++      {
++        title: t('成功率'),
++        dataIndex: 'success_rate',
++        align: 'center',
++        render: (value) => <Tag color='green'>{formatRate(value)}</Tag>,
++      },
++      {
++        title: t('错误率'),
++        dataIndex: 'error_rate',
++        align: 'center',
++        render: (value) => <Tag color='red'>{formatRate(value)}</Tag>,
++      },
++    ],
++    [t],
++  );
++
++  const modelTableData = useMemo(
++    () =>
++      sortedModelItems.slice(0, 20).map((item, index) => ({
++        ...item,
++        key: `${item.model_name || 'model'}-${index}`,
++      })),
++    [sortedModelItems],
++  );
++
++  const userTableData = useMemo(
++    () =>
++      userItems.map((item, index) => ({
++        ...item,
++        key: `${item.user_id || 'user'}-${index}`,
++      })),
++    [userItems],
++  );
++
++  const channelTableData = useMemo(
++    () =>
++      channelItems.map((item, index) => ({
++        ...item,
++        key: `${item.channel_id || 'channel'}-${index}`,
++      })),
++    [channelItems],
++  );
++
++  const compareRange = useMemo(() => getPreviousRange(startTimestamp, endTimestamp), [startTimestamp, endTimestamp]);
++
++  return (
++    <div className='admin-usage-report'>
++      <div className='admin-usage-report__stack'>
++        {errorMessage ? (
++          <Banner
++            type='danger'
++            bordered
++            closeIcon={null}
++            description={`${t('请求失败')}: ${errorMessage}`}
++          />
++        ) : null}
++
++        <Spin spinning={loading} style={FULL_WIDTH_STYLE}>
++          <div className='admin-usage-report__stack'>
++            <Card title={t('筛选与控制')} bodyStyle={{ padding: 16 }} className='admin-usage-report__filter-card'>
++              <div className='admin-usage-report__stack admin-usage-report__gap-sm'>
++                <div className='flex flex-wrap items-center gap-2'>
++                  {QUICK_RANGES.map((item) => (
++                    <Button
++                      key={item.key}
++                      type='primary'
++                      theme={quickRangeKey === item.key ? 'solid' : 'borderless'}
++                      onClick={() => handleQuickRange(item.key, item.days)}
++                    >
++                      {t(item.label)}
++                    </Button>
++                  ))}
++
++                  <div className='admin-usage-report__inline-switch'>
++                    <Typography.Text>{t('周期对比')}</Typography.Text>
++                    <Switch
++                      checked={compareEnabled}
++                      onChange={(checked) => {
++                        const nextEnabled = !!checked;
++                        setCompareEnabled(nextEnabled);
++                        setPage(1);
++                        runQuery({
++                          nextCompareEnabled: nextEnabled,
++                          nextPage: 1,
++                        });
++                      }}
++                    />
++                  </div>
++
++                  <Button theme='solid' type='primary' onClick={handleFilterSearch}>
++                    {t('查询')}
++                  </Button>
++                  <Button theme='light' onClick={handleRefresh}>
++                    {t('刷新')}
++                  </Button>
++                  <Button theme='borderless' onClick={handleReset}>
++                    {t('重置')}
++                  </Button>
++                </div>
++
++                <div className='grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6'>
++                  <div>
++                    <Typography.Text type='tertiary'>{t('时间粒度')}</Typography.Text>
++                    <Select
++                      style={FULL_WIDTH_STYLE}
++                      value={bucketSeconds}
++                      optionList={BUCKET_OPTIONS.map((item) => ({
++                        label: t(item.label),
++                        value: item.value,
++                      }))}
++                      onChange={(value) => {
++                        const nextBucket = toNumber(value) || 3600;
++                        setBucketSeconds(nextBucket);
++                        setPage(1);
++                        runQuery({
++                          nextBucketSeconds: nextBucket,
++                          nextPage: 1,
++                        });
++                      }}
++                    />
++                  </div>
++
++                  <div>
++                    <Typography.Text type='tertiary'>{t('模型筛选')}</Typography.Text>
++                    <Select
++                      style={FULL_WIDTH_STYLE}
++                      value={selectedModel}
++                      optionList={modelOptions}
++                      onChange={(value) => {
++                        const nextModel = trimToFilterValue(value);
++                        setSelectedModel(nextModel);
++                        setPage(1);
++                        runQuery({
++                          nextSelectedModel: nextModel,
++                          nextPage: 1,
++                        });
++                      }}
++                    />
++                  </div>
++
++                  <div>
++                    <Typography.Text type='tertiary'>{t('渠道筛选')}</Typography.Text>
++                    <Select
++                      style={FULL_WIDTH_STYLE}
++                      value={selectedChannel}
++                      optionList={channelOptions}
++                      onChange={(value) => {
++                        const nextChannel = trimToFilterValue(value);
++                        setSelectedChannel(nextChannel);
++                        setPage(1);
++                        runQuery({
++                          nextSelectedChannel: nextChannel,
++                          nextPage: 1,
++                        });
++                      }}
++                    />
++                  </div>
++
++                  <div>
++                    <Typography.Text type='tertiary'>{t('分组筛选')}</Typography.Text>
++                    <Select
++                      style={FULL_WIDTH_STYLE}
++                      value={selectedGroup}
++                      optionList={groupOptions}
++                      onChange={(value) => {
++                        const nextGroup = trimToFilterValue(value);
++                        setSelectedGroup(nextGroup);
++                        setPage(1);
++                        runQuery({
++                          nextSelectedGroup: nextGroup,
++                          nextPage: 1,
++                        });
++                      }}
++                    />
++                  </div>
++
++                  <div>
++                    <Typography.Text type='tertiary'>{t('模型趋势 TopN')}</Typography.Text>
++                    <Select
++                      style={FULL_WIDTH_STYLE}
++                      value={modelTrendTopN}
++                      optionList={MODEL_TOP_N_OPTIONS.map((item) => ({
++                        label: t(item.label),
++                        value: item.value,
++                      }))}
++                      onChange={(value) => {
++                        const nextTopN = Math.min(20, Math.max(1, toNumber(value) || 8));
++                        setModelTrendTopN(nextTopN);
++                        setPage(1);
++                        runQuery({
++                          nextModelTrendTopN: nextTopN,
++                          nextPage: 1,
++                        });
++                      }}
++                    />
++                  </div>
++
++                  <div>
++                    <Typography.Text type='tertiary'>{t('模型排序口径')}</Typography.Text>
++                    <Select
++                      style={FULL_WIDTH_STYLE}
++                      value={modelTrendSortBy}
++                      optionList={MODEL_SORT_FIELD_OPTIONS.map((item) => ({
++                        label: t(item.label),
++                        value: item.value,
++                      }))}
++                      onChange={(value) => {
++                        const nextSortBy = trimToFilterValue(value) || 'token_used';
++                        setModelTrendSortBy(nextSortBy);
++                        setPage(1);
++                        runQuery({
++                          nextModelTrendSortBy: nextSortBy,
++                          nextPage: 1,
++                        });
++                      }}
++                    />
++                  </div>
++                </div>
++
++                <div className='grid grid-cols-1 gap-3 md:grid-cols-2'>
++                  <Input
++                    value={userKeyword}
++                    placeholder={t('按用户名搜索')}
++                    onChange={setUserKeyword}
++                    onEnterPress={handleFilterSearch}
++                  />
++                  <Typography.Text size='small' type='tertiary' className='self-center'>
++                    {compareEnabled
++                      ? `${t('当前区间')}: ${formatTimestamp(startTimestamp)} ~ ${formatTimestamp(endTimestamp)} | ${t('对比区间')}: ${formatTimestamp(compareRange.start)} ~ ${formatTimestamp(compareRange.end)}`
++                      : `${t('时间范围')}: ${formatTimestamp(startTimestamp)} ~ ${formatTimestamp(endTimestamp)}`}
++                  </Typography.Text>
++                </div>
++              </div>
++            </Card>
++
++            <Card title={t('全局概览')} bodyStyle={{ padding: 16 }}>
++              <div className='grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5 2xl:grid-cols-10'>
++                <MetricCard title={t('总请求数')} value={renderNumber(overview.request_count)} />
++                <MetricCard title={t('成功请求')} value={renderNumber(overview.success_count)} />
++                <MetricCard title={t('错误请求')} value={renderNumber(overview.error_count)} />
++                <MetricCard title={t('成功率')} value={formatRate(overview.success_rate)} tagColor='green' />
++                <MetricCard title={t('错误率')} value={formatRate(overview.error_rate)} tagColor='red' />
++                <MetricCard title={t('总 Token 用量')} value={renderNumber(overview.token_used)} />
++                <MetricCard title={t('总配额')} value={renderQuota(overview.quota, 6)} />
++                <MetricCard title={t('近60秒 RPM')} value={renderNumber(overview.rpm)} />
++                <MetricCard title={t('近60秒 TPM')} value={renderNumber(overview.tpm)} />
++                <MetricCard
++                  title={t('活跃模型/用户')}
++                  value={`${renderNumber(overview.active_model_count)} / ${renderNumber(overview.active_user_count)}`}
++                />
++              </div>
++            </Card>
++
++            <div className='grid grid-cols-1 gap-4 2xl:grid-cols-3'>
++              <Card title={t('整体 Token 趋势')} bodyStyle={{ padding: 16 }} className='2xl:col-span-2'>
++                {tokenTrendChartData.length === 0 ? (
++                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('暂无趋势数据')} />
++                ) : (
++                  <ChartBox height={360} spec={tokenTrendSpec} />
++                )}
++              </Card>
++
++              <Card title={t('配额消耗趋势')} bodyStyle={{ padding: 16 }}>
++                {quotaTrendChartData.length === 0 ? (
++                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('暂无趋势数据')} />
++                ) : (
++                  <ChartBox height={360} spec={quotaTrendSpec} />
++                )}
++              </Card>
++            </div>
++
++            <div className='grid grid-cols-1 gap-4 xl:grid-cols-2'>
++              <Card title={t('请求成功/错误趋势')} bodyStyle={{ padding: 16 }}>
++                {requestTrendChartData.length === 0 ? (
++                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('暂无趋势数据')} />
++                ) : (
++                  <ChartBox height={360} spec={requestTrendSpec} />
++                )}
++              </Card>
++
++              <Card title={t('模型用量总览（Top12）')} bodyStyle={{ padding: 16 }}>
++                {modelSummaryChartData.length === 0 ? (
++                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('暂无模型数据')} />
++                ) : (
++                  <ChartBox height={360} spec={modelSummarySpec} />
++                )}
++              </Card>
++            </div>
++
++            <div className='grid grid-cols-1 gap-4 2xl:grid-cols-3'>
++              <Card title={t('各模型 Token 趋势（Top）')} bodyStyle={{ padding: 16 }} className='2xl:col-span-2'>
++                {modelTrendChartData.length === 0 ? (
++                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('暂无模型趋势数据')} />
++                ) : (
++                  <ChartBox height={420} spec={modelTrendSpec} />
++                )}
++              </Card>
++
++              <Card title={t('模型表现榜')} bodyStyle={{ padding: 16 }}>
++                <Table
++                  size='small'
++                  pagination={false}
++                  dataSource={modelTableData}
++                  columns={modelColumns}
++                  empty={<Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('暂无模型数据')} />}
++                />
++              </Card>
++            </div>
++
++            <div className='grid grid-cols-1 gap-4 2xl:grid-cols-2'>
++              <Card title={t('渠道分析')} bodyStyle={{ padding: 16 }}>
++                {channelChartData.length === 0 ? (
++                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('暂无渠道数据')} />
++                ) : (
++                  <div className='admin-usage-report__stack admin-usage-report__gap-sm'>
++                    <ChartBox height={320} spec={channelSpec} />
++                    <Table
++                      size='small'
++                      pagination={false}
++                      dataSource={channelTableData.slice(0, 8)}
++                      columns={channelColumns}
++                    />
++                  </div>
++                )}
++              </Card>
++
++              <Card title={t('用户明细')} bodyStyle={{ padding: 16 }}>
++                <div className='admin-usage-report__stack admin-usage-report__gap-sm'>
++                  <div className='grid grid-cols-1 gap-3 md:grid-cols-2'>
++                    <div>
++                      <Typography.Text type='tertiary'>{t('排序字段')}</Typography.Text>
++                      <Select
++                        value={sortBy}
++                        optionList={sortFieldOptions}
++                        style={FULL_WIDTH_STYLE}
++                        onChange={handleSortFieldChange}
++                      />
++                    </div>
++                    <div>
++                      <Typography.Text type='tertiary'>{t('排序方向')}</Typography.Text>
++                      <Select
++                        value={sortOrder}
++                        optionList={sortOrderOptions}
++                        style={FULL_WIDTH_STYLE}
++                        onChange={handleSortOrderChange}
++                      />
++                    </div>
++                  </div>
++
++                  <Table
++                    size='small'
++                    pagination={false}
++                    scroll={{ x: 980 }}
++                    style={{ fontSize: 12 }}
++                    dataSource={userTableData}
++                    columns={userColumns}
++                    empty={<Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('暂无用户数据')} />}
++                  />
++
++                  <div className='flex justify-end'>
++                    <Pagination
++                      total={userTotal}
++                      currentPage={page}
++                      pageSize={pageSize}
++                      showSizeChanger
++                      pageSizeOpts={[10, 20, 50, 100]}
++                      onPageChange={handlePageChange}
++                      onPageSizeChange={handlePageSizeChange}
++                    />
++                  </div>
++                </div>
++              </Card>
++            </div>
++          </div>
++        </Spin>
++      </div>
++    </div>
++  );
++};
++
++export default AdminUsageReport;
