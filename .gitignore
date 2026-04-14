@@ -29,5 +29,5 @@ data/
 .gomodcache/
 .gocache-temp
 .gopath
-/.deploy
-deploy_run.log
+
+token_estimator_test.go
