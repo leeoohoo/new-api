@@ -191,9 +191,10 @@ func ValidateUserToken(key string) (token *Token, err error) {
 	}
 	token, err = GetTokenByKey(key, false)
 	if err == nil {
-		if token.Status == common.TokenStatusExhausted ||
-			token.Status == common.TokenStatusExpired ||
-			token.Status != common.TokenStatusEnabled {
+		if token.Status == common.TokenStatusExpired || token.Status == common.TokenStatusDisabled {
+			return token, ErrTokenInvalid
+		}
+		if token.Status != common.TokenStatusEnabled && token.Status != common.TokenStatusExhausted {
 			return token, ErrTokenInvalid
 		}
 		if token.ExpiredTime != -1 && token.ExpiredTime < common.GetTimestamp() {
@@ -206,8 +207,21 @@ func ValidateUserToken(key string) (token *Token, err error) {
 			}
 			return token, ErrTokenInvalid
 		}
+		hasRequestCountSub := false
+		if token.Status == common.TokenStatusExhausted || (!token.UnlimitedQuota && token.RemainQuota <= 0) {
+			hasRequestCountSub, err = HasActiveRequestCountSubscription(token.UserId)
+			if err != nil {
+				return nil, fmt.Errorf("%w: %v", ErrDatabase, err)
+			}
+		}
+		if token.Status == common.TokenStatusExhausted && !hasRequestCountSub {
+			return token, ErrTokenInvalid
+		}
 		if !token.UnlimitedQuota && token.RemainQuota <= 0 {
-			if !common.RedisEnabled {
+			if hasRequestCountSub {
+				return token, nil
+			}
+			if !common.RedisEnabled && token.Status != common.TokenStatusExhausted {
 				token.Status = common.TokenStatusExhausted
 				err := token.SelectUpdate()
 				if err != nil {

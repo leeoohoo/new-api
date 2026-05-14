@@ -17,13 +17,13 @@ import (
 	"gorm.io/gorm"
 )
 
-var commonGroupCol string
-var commonKeyCol string
-var commonTrueVal string
-var commonFalseVal string
+var commonGroupCol = "`group`"
+var commonKeyCol = "`key`"
+var commonTrueVal = "1"
+var commonFalseVal = "0"
 
-var logKeyCol string
-var logGroupCol string
+var logKeyCol = "`key`"
+var logGroupCol = "`group`"
 
 func initCol() {
 	// init common column names
@@ -293,6 +293,7 @@ func migrateDB() error {
 			return err
 		}
 	}
+	migrateSubscriptionMeterTypeDefaults()
 	return nil
 }
 
@@ -361,6 +362,7 @@ func migrateDBFast() error {
 			return err
 		}
 	}
+	migrateSubscriptionMeterTypeDefaults()
 	common.SysLog("database migrated")
 	return nil
 }
@@ -400,6 +402,7 @@ func ensureSubscriptionPlanTableSQLite() error {
 ` + "`max_purchase_per_user`" + ` integer DEFAULT 0,
 ` + "`upgrade_group`" + ` varchar(64) DEFAULT '',
 ` + "`total_amount`" + ` bigint NOT NULL DEFAULT 0,
+` + "`meter_type`" + ` varchar(32) NOT NULL DEFAULT 'quota',
 ` + "`quota_reset_period`" + ` varchar(16) DEFAULT 'never',
 ` + "`quota_reset_custom_seconds`" + ` bigint DEFAULT 0,
 ` + "`created_at`" + ` bigint,
@@ -433,6 +436,7 @@ PRIMARY KEY (` + "`id`" + `)
 		{Name: "max_purchase_per_user", DDL: "`max_purchase_per_user` integer DEFAULT 0"},
 		{Name: "upgrade_group", DDL: "`upgrade_group` varchar(64) DEFAULT ''"},
 		{Name: "total_amount", DDL: "`total_amount` bigint NOT NULL DEFAULT 0"},
+		{Name: "meter_type", DDL: "`meter_type` varchar(32) NOT NULL DEFAULT 'quota'"},
 		{Name: "quota_reset_period", DDL: "`quota_reset_period` varchar(16) DEFAULT 'never'"},
 		{Name: "quota_reset_custom_seconds", DDL: "`quota_reset_custom_seconds` bigint DEFAULT 0"},
 		{Name: "created_at", DDL: "`created_at` bigint"},
@@ -559,6 +563,22 @@ func migrateSubscriptionPlanPriceAmount() {
 		} else {
 			common.SysLog(fmt.Sprintf("Successfully migrated %s.%s to decimal(10,6)", tableName, columnName))
 		}
+	}
+}
+
+func migrateSubscriptionMeterTypeDefaults() {
+	if !DB.Migrator().HasTable("subscription_plans") || !DB.Migrator().HasTable("user_subscriptions") {
+		return
+	}
+	if DB.Migrator().HasColumn(&SubscriptionPlan{}, "meter_type") {
+		_ = DB.Model(&SubscriptionPlan{}).
+			Where("meter_type = '' OR meter_type IS NULL").
+			Update("meter_type", SubscriptionMeterQuota).Error
+	}
+	if DB.Migrator().HasColumn(&UserSubscription{}, "meter_type") {
+		_ = DB.Model(&UserSubscription{}).
+			Where("meter_type = '' OR meter_type IS NULL").
+			Update("meter_type", SubscriptionMeterQuota).Error
 	}
 }
 

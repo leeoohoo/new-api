@@ -222,8 +222,8 @@ const EditTokenModal = (props) => {
       localInputs.remain_quota = localInputs.unlimited_quota
         ? 0
         : displayAmountToQuota(localInputs.remain_amount);
-      if (!localInputs.unlimited_quota && localInputs.remain_quota <= 0) {
-        showError(t('请输入金额'));
+      if (!localInputs.unlimited_quota && localInputs.remain_quota < 0) {
+        showError(t('请输入有效金额'));
         setLoading(false);
         return;
       }
@@ -265,8 +265,8 @@ const EditTokenModal = (props) => {
         localInputs.remain_quota = localInputs.unlimited_quota
           ? 0
           : displayAmountToQuota(localInputs.remain_amount);
-        if (!localInputs.unlimited_quota && localInputs.remain_quota <= 0) {
-          showError(t('请输入金额'));
+        if (!localInputs.unlimited_quota && localInputs.remain_quota < 0) {
+          showError(t('请输入有效金额'));
           setLoading(false);
           break;
         }
@@ -541,6 +541,11 @@ const EditTokenModal = (props) => {
                       style={{ width: '100%' }}
                       showClear
                     />
+                    <div className='text-xs text-gray-500 mt-1'>
+                      {t(
+                        '若用户使用按次数订阅，可保留为 0；系统会按订阅次数计费，不依赖令牌额度',
+                      )}
+                    </div>
                   </Col>
                   <Col span={24}>
                     <div

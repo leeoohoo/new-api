@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
@@ -33,6 +34,14 @@ func PreConsumeBilling(c *gin.Context, preConsumedQuota int, relayInfo *relaycom
 // 否则回退到旧的 PostConsumeQuota 路径（兼容按次计费等场景）。
 func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuota int) error {
 	if relayInfo.Billing != nil {
+		if relayInfo.SubscriptionMeterType == model.SubscriptionMeterRequestCount {
+			logger.LogInfo(ctx, "按次数订阅结算完成，本次保留 1 次")
+			if err := relayInfo.Billing.Settle(1); err != nil {
+				return err
+			}
+			checkAndSendSubscriptionQuotaNotify(relayInfo)
+			return nil
+		}
 		preConsumed := relayInfo.Billing.GetPreConsumedQuota()
 		delta := actualQuota - preConsumed
 

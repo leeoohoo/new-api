@@ -130,6 +130,7 @@ func AdminCreateSubscriptionPlan(c *gin.Context) {
 		req.Plan.Currency = "USD"
 	}
 	req.Plan.Currency = "USD"
+	req.Plan.MeterType = model.NormalizeSubscriptionMeterType(req.Plan.MeterType)
 	if req.Plan.DurationUnit == "" {
 		req.Plan.DurationUnit = model.SubscriptionDurationMonth
 	}
@@ -142,6 +143,10 @@ func AdminCreateSubscriptionPlan(c *gin.Context) {
 	}
 	if req.Plan.TotalAmount < 0 {
 		common.ApiErrorMsg(c, "总额度不能为负数")
+		return
+	}
+	if req.Plan.MeterType == model.SubscriptionMeterRequestCount && req.Plan.TotalAmount <= 0 {
+		common.ApiErrorMsg(c, "次数套餐的总次数需大于0")
 		return
 	}
 	req.Plan.UpgradeGroup = strings.TrimSpace(req.Plan.UpgradeGroup)
@@ -193,6 +198,7 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 		req.Plan.Currency = "USD"
 	}
 	req.Plan.Currency = "USD"
+	req.Plan.MeterType = model.NormalizeSubscriptionMeterType(req.Plan.MeterType)
 	if req.Plan.DurationUnit == "" {
 		req.Plan.DurationUnit = model.SubscriptionDurationMonth
 	}
@@ -205,6 +211,10 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 	}
 	if req.Plan.TotalAmount < 0 {
 		common.ApiErrorMsg(c, "总额度不能为负数")
+		return
+	}
+	if req.Plan.MeterType == model.SubscriptionMeterRequestCount && req.Plan.TotalAmount <= 0 {
+		common.ApiErrorMsg(c, "次数套餐的总次数需大于0")
 		return
 	}
 	req.Plan.UpgradeGroup = strings.TrimSpace(req.Plan.UpgradeGroup)
@@ -236,6 +246,7 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 			"creem_product_id":           req.Plan.CreemProductId,
 			"max_purchase_per_user":      req.Plan.MaxPurchasePerUser,
 			"total_amount":               req.Plan.TotalAmount,
+			"meter_type":                 req.Plan.MeterType,
 			"upgrade_group":              req.Plan.UpgradeGroup,
 			"quota_reset_period":         req.Plan.QuotaResetPeriod,
 			"quota_reset_custom_seconds": req.Plan.QuotaResetCustomSeconds,
@@ -290,6 +301,10 @@ func AdminBindSubscription(c *gin.Context) {
 	}
 	msg, err := model.AdminBindSubscription(req.UserId, req.PlanId, "")
 	if err != nil {
+		if strings.Contains(err.Error(), model.ErrSubscriptionMeterTypeConflict.Error()) {
+			common.ApiErrorMsg(c, "用户当前已有不同计量类型的生效订阅，不能混用")
+			return
+		}
 		common.ApiError(c, err)
 		return
 	}
@@ -334,6 +349,10 @@ func AdminCreateUserSubscription(c *gin.Context) {
 	}
 	msg, err := model.AdminBindSubscription(userId, req.PlanId, "")
 	if err != nil {
+		if strings.Contains(err.Error(), model.ErrSubscriptionMeterTypeConflict.Error()) {
+			common.ApiErrorMsg(c, "用户当前已有不同计量类型的生效订阅，不能混用")
+			return
+		}
 		common.ApiError(c, err)
 		return
 	}

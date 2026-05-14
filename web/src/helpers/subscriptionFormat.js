@@ -32,3 +32,31 @@ export function formatSubscriptionResetPeriod(plan, t) {
   }
   return t('不重置');
 }
+
+export function getSubscriptionMeterType(plan) {
+  return plan?.meter_type === 'request_count' ? 'request_count' : 'quota';
+}
+
+export function formatSubscriptionAmount(plan, amount, t, renderQuota) {
+  const meterType = getSubscriptionMeterType(plan);
+  const numeric = Number(amount || 0);
+  if (numeric < 0) {
+    return `-${formatSubscriptionAmount(plan, Math.abs(numeric), t, renderQuota)}`;
+  }
+  if (numeric === 0) {
+    return meterType === 'request_count' ? `0 ${t('次')}` : renderQuota(0);
+  }
+  if (numeric <= 0) {
+    return t('不限');
+  }
+  if (meterType === 'request_count') {
+    return `${numeric} ${t('次')}`;
+  }
+  return renderQuota(numeric);
+}
+
+export function getSubscriptionAmountLabel(plan, t) {
+  return getSubscriptionMeterType(plan) === 'request_count'
+    ? t('总次数')
+    : t('总额度');
+}

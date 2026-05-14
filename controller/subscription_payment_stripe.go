@@ -51,6 +51,14 @@ func SubscriptionRequestStripePay(c *gin.Context) {
 	}
 
 	userId := c.GetInt("id")
+	if err := model.EnsureUserActiveSubscriptionMeterTypeCompatible(userId, plan.MeterType); err != nil {
+		if err == model.ErrSubscriptionMeterTypeConflict || strings.Contains(err.Error(), model.ErrSubscriptionMeterTypeConflict.Error()) {
+			common.ApiErrorMsg(c, "当前已有不同计量类型的生效订阅，不能混用")
+			return
+		}
+		common.ApiError(c, err)
+		return
+	}
 	user, err := model.GetUserById(userId, false)
 	if err != nil {
 		common.ApiError(c, err)

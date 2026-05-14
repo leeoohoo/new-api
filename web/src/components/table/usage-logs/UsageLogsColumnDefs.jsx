@@ -259,9 +259,11 @@ function renderFirstUseTime(type, t) {
 function renderBillingTag(record, t) {
   const other = getLogOther(record.other);
   if (other?.billing_source === 'subscription') {
+    const isRequestCount =
+      other?.subscription_meter_type === 'request_count';
     return (
       <Tag color='green' shape='circle'>
-        {t('订阅抵扣')}
+        {isRequestCount ? t('订阅计次') : t('订阅抵扣')}
       </Tag>
     );
   }
@@ -850,9 +852,24 @@ export const getLogsColumns = ({
         const other = getLogOther(record.other);
         const isSubscription = other?.billing_source === 'subscription';
         if (isSubscription) {
+          const isRequestCount =
+            other?.subscription_meter_type === 'request_count';
+          const consumedCount =
+            other?.subscription_consumed ?? other?.subscription_pre_consumed ?? 1;
           // Subscription billed: show only tag (no $0), but keep tooltip for equivalent cost.
           return (
-            <Tooltip content={`${t('由订阅抵扣')}：${renderQuota(text, 6)}`}>
+            <Tooltip
+              content={
+                isRequestCount
+                  ? (
+                      <div>
+                        <div>{`${t('由次数订阅抵扣')}：${consumedCount} ${t('次')}`}</div>
+                        <div>{`${t('等价额度统计')}：${renderQuota(text, 6)}`}</div>
+                      </div>
+                    )
+                  : `${t('由订阅抵扣')}：${renderQuota(text, 6)}`
+              }
+            >
               <span>{renderBillingTag(record, t)}</span>
             </Tooltip>
           );

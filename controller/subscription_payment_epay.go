@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Calcium-Ion/go-epay/epay"
@@ -48,6 +49,14 @@ func SubscriptionRequestEpay(c *gin.Context) {
 	}
 
 	userId := c.GetInt("id")
+	if err := model.EnsureUserActiveSubscriptionMeterTypeCompatible(userId, plan.MeterType); err != nil {
+		if err == model.ErrSubscriptionMeterTypeConflict || strings.Contains(err.Error(), model.ErrSubscriptionMeterTypeConflict.Error()) {
+			common.ApiErrorMsg(c, "当前已有不同计量类型的生效订阅，不能混用")
+			return
+		}
+		common.ApiError(c, err)
+		return
+	}
 	if plan.MaxPurchasePerUser > 0 {
 		count, err := model.CountUserSubscriptionsByPlan(userId, plan.Id)
 		if err != nil {

@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
@@ -203,10 +204,23 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	}
 
 	// 7. 预扣费（仅首次 — 重试时 info.Billing 已存在，跳过）
-	if info.Billing == nil && !info.PriceData.FreeModel {
-		info.ForcePreConsume = true
-		if apiErr := service.PreConsumeBilling(c, info.PriceData.Quota, info); apiErr != nil {
-			return nil, service.TaskErrorFromAPIError(apiErr)
+	if info.Billing == nil {
+		shouldPreConsume := !info.PriceData.FreeModel
+		if info.PriceData.FreeModel {
+			hasRequestCountSub, subErr := model.HasActiveRequestCountSubscription(info.UserId)
+			if subErr != nil {
+				return nil, service.TaskErrorWrapper(subErr, "query_subscription_failed", http.StatusInternalServerError)
+			}
+			if hasRequestCountSub {
+				shouldPreConsume = true
+				logger.LogInfo(c, fmt.Sprintf("任务模型 %s 免费，但用户存在按次数订阅，按次数预扣", modelName))
+			}
+		}
+		if shouldPreConsume {
+			info.ForcePreConsume = true
+			if apiErr := service.PreConsumeBilling(c, info.PriceData.Quota, info); apiErr != nil {
+				return nil, service.TaskErrorFromAPIError(apiErr)
+			}
 		}
 	}
 

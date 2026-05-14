@@ -32,9 +32,16 @@ const (
 	SubscriptionResetCustom  = "custom"
 )
 
+// Subscription meter type
+const (
+	SubscriptionMeterQuota        = "quota"
+	SubscriptionMeterRequestCount = "request_count"
+)
+
 var (
 	ErrSubscriptionOrderNotFound      = errors.New("subscription order not found")
 	ErrSubscriptionOrderStatusInvalid = errors.New("subscription order status invalid")
+	ErrSubscriptionMeterTypeConflict  = errors.New("active subscription meter type conflict")
 )
 
 const (
@@ -171,6 +178,9 @@ type SubscriptionPlan struct {
 	// Total quota (amount in quota units, 0 = unlimited)
 	TotalAmount int64 `json:"total_amount" gorm:"type:bigint;not null;default:0"`
 
+	// Meter type: quota / request_count
+	MeterType string `json:"meter_type" gorm:"type:varchar(32);not null;default:'quota'"`
+
 	// Quota reset period for plan
 	QuotaResetPeriod        string `json:"quota_reset_period" gorm:"type:varchar(16);default:'never'"`
 	QuotaResetCustomSeconds int64  `json:"quota_reset_custom_seconds" gorm:"type:bigint;default:0"`
@@ -238,6 +248,8 @@ type UserSubscription struct {
 	AmountTotal int64 `json:"amount_total" gorm:"type:bigint;not null;default:0"`
 	AmountUsed  int64 `json:"amount_used" gorm:"type:bigint;not null;default:0"`
 
+	MeterType string `json:"meter_type" gorm:"type:varchar(32);not null;default:'quota'"`
+
 	StartTime int64  `json:"start_time" gorm:"bigint"`
 	EndTime   int64  `json:"end_time" gorm:"bigint;index;index:idx_user_sub_active,priority:3"`
 	Status    string `json:"status" gorm:"type:varchar(32);index;index:idx_user_sub_active,priority:2"` // active/expired/cancelled
@@ -268,6 +280,15 @@ func (s *UserSubscription) BeforeUpdate(tx *gorm.DB) error {
 
 type SubscriptionSummary struct {
 	Subscription *UserSubscription `json:"subscription"`
+}
+
+func NormalizeSubscriptionMeterType(meterType string) string {
+	switch strings.TrimSpace(meterType) {
+	case SubscriptionMeterRequestCount:
+		return SubscriptionMeterRequestCount
+	default:
+		return SubscriptionMeterQuota
+	}
 }
 
 func calcPlanEndTime(start time.Time, plan *SubscriptionPlan) (int64, error) {
@@ -444,6 +465,7 @@ func CreateUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *Subscriptio
 	if userId <= 0 {
 		return nil, errors.New("invalid user id")
 	}
+	planMeterType := NormalizeSubscriptionMeterType(plan.MeterType)
 	if plan.MaxPurchasePerUser > 0 {
 		var count int64
 		if err := tx.Model(&UserSubscription{}).
@@ -454,6 +476,9 @@ func CreateUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *Subscriptio
 		if count >= int64(plan.MaxPurchasePerUser) {
 			return nil, errors.New("已达到该套餐购买上限")
 		}
+	}
+	if err := EnsureUserActiveSubscriptionMeterTypeCompatibleTx(tx, userId, planMeterType); err != nil {
+		return nil, err
 	}
 	nowUnix := GetDBTimestamp()
 	now := time.Unix(nowUnix, 0)
@@ -487,6 +512,7 @@ func CreateUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *Subscriptio
 		PlanId:        plan.Id,
 		AmountTotal:   plan.TotalAmount,
 		AmountUsed:    0,
+		MeterType:     planMeterType,
 		StartTime:     now.Unix(),
 		EndTime:       endUnix,
 		Status:        "active",
@@ -682,6 +708,33 @@ func HasActiveUserSubscription(userId int) (bool, error) {
 	return count > 0, nil
 }
 
+func GetActiveUserSubscriptionMeterType(userId int) (string, bool, error) {
+	if userId <= 0 {
+		return "", false, errors.New("invalid userId")
+	}
+	now := common.GetTimestamp()
+	var sub UserSubscription
+	err := DB.Select("meter_type").
+		Where("user_id = ? AND status = ? AND end_time > ?", userId, "active", now).
+		Order("end_time desc, id desc").
+		First(&sub).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	return NormalizeSubscriptionMeterType(sub.MeterType), true, nil
+}
+
+func HasActiveRequestCountSubscription(userId int) (bool, error) {
+	meterType, hasSub, err := GetActiveUserSubscriptionMeterType(userId)
+	if err != nil {
+		return false, err
+	}
+	return hasSub && meterType == SubscriptionMeterRequestCount, nil
+}
+
 // GetAllUserSubscriptions returns all subscriptions (active and expired) for a user.
 func GetAllUserSubscriptions(userId int) ([]SubscriptionSummary, error) {
 	if userId <= 0 {
@@ -803,6 +856,39 @@ type SubscriptionPreConsumeResult struct {
 	AmountTotal        int64
 	AmountUsedBefore   int64
 	AmountUsedAfter    int64
+	MeterType          string
+}
+
+func EnsureUserActiveSubscriptionMeterTypeCompatibleTx(tx *gorm.DB, userId int, meterType string) error {
+	if tx == nil {
+		return errors.New("tx is nil")
+	}
+	if userId <= 0 {
+		return errors.New("invalid userId")
+	}
+	targetMeterType := NormalizeSubscriptionMeterType(meterType)
+	now := GetDBTimestamp()
+	var sub UserSubscription
+	err := tx.Where("user_id = ? AND status = ? AND end_time > ?", userId, "active", now).
+		Order("end_time desc, id desc").
+		First(&sub).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return err
+	}
+	existing := NormalizeSubscriptionMeterType(sub.MeterType)
+	if existing != targetMeterType {
+		return fmt.Errorf("%w: active=%s target=%s", ErrSubscriptionMeterTypeConflict, existing, targetMeterType)
+	}
+	return nil
+}
+
+func EnsureUserActiveSubscriptionMeterTypeCompatible(userId int, meterType string) error {
+	return DB.Transaction(func(tx *gorm.DB) error {
+		return EnsureUserActiveSubscriptionMeterTypeCompatibleTx(tx, userId, meterType)
+	})
 }
 
 // ExpireDueSubscriptions marks expired subscriptions and handles group downgrade.
@@ -986,6 +1072,7 @@ func PreConsumeUserSubscription(requestId string, userId int, modelName string, 
 			returnValue.AmountTotal = sub.AmountTotal
 			returnValue.AmountUsedBefore = sub.AmountUsed
 			returnValue.AmountUsedAfter = sub.AmountUsed
+			returnValue.MeterType = NormalizeSubscriptionMeterType(sub.MeterType)
 			return nil
 		}
 
@@ -1046,6 +1133,7 @@ func PreConsumeUserSubscription(requestId string, userId int, modelName string, 
 			returnValue.AmountTotal = sub.AmountTotal
 			returnValue.AmountUsedBefore = usedBefore
 			returnValue.AmountUsedAfter = sub.AmountUsed
+			returnValue.MeterType = NormalizeSubscriptionMeterType(sub.MeterType)
 			return nil
 		}
 		return fmt.Errorf("subscription quota insufficient, need=%d", amount)

@@ -50,6 +50,28 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 		other["is_model_mapped"] = true
 		other["upstream_model_name"] = info.UpstreamModelName
 	}
+	if info.BillingSource == BillingSourceSubscription {
+		meterType := info.SubscriptionMeterType
+		if meterType == "" {
+			meterType = model.SubscriptionMeterQuota
+		}
+		other["billing_source"] = BillingSourceSubscription
+		other["subscription_id"] = info.SubscriptionId
+		other["subscription_plan_id"] = info.SubscriptionPlanId
+		other["subscription_plan_title"] = info.SubscriptionPlanTitle
+		other["subscription_meter_type"] = meterType
+		other["subscription_pre_consumed"] = info.SubscriptionPreConsumed
+		other["subscription_consumed"] = info.SubscriptionPreConsumed
+		if info.SubscriptionAmountTotal > 0 {
+			other["subscription_total"] = info.SubscriptionAmountTotal
+			other["subscription_used"] = info.SubscriptionAmountUsedAfterPreConsume
+			remain := info.SubscriptionAmountTotal - info.SubscriptionAmountUsedAfterPreConsume
+			if remain < 0 {
+				remain = 0
+			}
+			other["subscription_remain"] = remain
+		}
+	}
 	model.RecordConsumeLog(c, info.UserId, model.RecordConsumeLogParams{
 		ChannelId: info.ChannelId,
 		ModelName: info.OriginModelName,
@@ -84,6 +106,13 @@ func taskIsSubscription(task *model.Task) bool {
 	return task.PrivateData.BillingSource == BillingSourceSubscription && task.PrivateData.SubscriptionId > 0
 }
 
+func taskUsesRequestCountSubscription(task *model.Task) bool {
+	if task == nil {
+		return false
+	}
+	return task.PrivateData.SubscriptionMeterType == model.SubscriptionMeterRequestCount
+}
+
 // taskAdjustFunding 调整任务的资金来源（钱包或订阅），delta > 0 表示扣费，delta < 0 表示退还。
 func taskAdjustFunding(task *model.Task, delta int) error {
 	if taskIsSubscription(task) {
@@ -98,6 +127,9 @@ func taskAdjustFunding(task *model.Task, delta int) error {
 // taskAdjustTokenQuota 调整任务的令牌额度，delta > 0 表示扣费，delta < 0 表示退还。
 // 需要通过 resolveTokenKey 运行时获取 key（不从 PrivateData 中读取）。
 func taskAdjustTokenQuota(ctx context.Context, task *model.Task, delta int) {
+	if taskUsesRequestCountSubscription(task) {
+		return
+	}
 	if task.PrivateData.TokenId <= 0 || delta == 0 {
 		return
 	}
@@ -136,7 +168,26 @@ func taskBillingOther(task *model.Task) map[string]interface{} {
 		other["is_model_mapped"] = true
 		other["upstream_model_name"] = props.UpstreamModelName
 	}
+	if taskIsSubscription(task) {
+		meterType := task.PrivateData.SubscriptionMeterType
+		if meterType == "" {
+			meterType = model.SubscriptionMeterQuota
+		}
+		other["billing_source"] = BillingSourceSubscription
+		other["subscription_id"] = task.PrivateData.SubscriptionId
+		other["subscription_meter_type"] = meterType
+	}
 	return other
+}
+
+func taskConsumedQuota(task *model.Task) int {
+	if taskUsesRequestCountSubscription(task) {
+		return 1
+	}
+	if task == nil {
+		return 0
+	}
+	return task.Quota
 }
 
 // taskModelName 从 BillingContext 或 Properties 中获取模型名称。
@@ -150,7 +201,7 @@ func taskModelName(task *model.Task) string {
 // RefundTaskQuota 统一的任务失败退款逻辑。
 // 当异步任务失败时，将预扣的 quota 退还给用户（支持钱包和订阅），并退还令牌额度。
 func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) {
-	quota := task.Quota
+	quota := taskConsumedQuota(task)
 	if quota == 0 {
 		return
 	}
@@ -185,6 +236,9 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) {
 // actualQuota 是任务完成后的实际应扣额度，与预扣额度 (task.Quota) 做差额结算。
 // reason 用于日志记录（例如 "token重算" 或 "adaptor调整"）。
 func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int, reason string) {
+	if taskUsesRequestCountSubscription(task) {
+		return
+	}
 	if actualQuota <= 0 {
 		return
 	}

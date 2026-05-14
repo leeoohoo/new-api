@@ -157,9 +157,21 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	// common.SetContextKey(c, constant.ContextKeyTokenCountMeta, meta)
 
+	shouldPreConsume := !priceData.FreeModel
 	if priceData.FreeModel {
-		logger.LogInfo(c, fmt.Sprintf("模型 %s 免费，跳过预扣费", relayInfo.OriginModelName))
-	} else {
+		hasRequestCountSub, subErr := model.HasActiveRequestCountSubscription(relayInfo.UserId)
+		if subErr != nil {
+			newAPIError = types.NewError(subErr, types.ErrorCodeQueryDataError)
+			return
+		}
+		if hasRequestCountSub {
+			shouldPreConsume = true
+			logger.LogInfo(c, fmt.Sprintf("模型 %s 免费，但用户存在按次数订阅，按次数预扣", relayInfo.OriginModelName))
+		} else {
+			logger.LogInfo(c, fmt.Sprintf("模型 %s 免费，跳过预扣费", relayInfo.OriginModelName))
+		}
+	}
+	if shouldPreConsume {
 		newAPIError = service.PreConsumeBilling(c, priceData.QuotaToPreConsume, relayInfo)
 		if newAPIError != nil {
 			return
@@ -574,6 +586,7 @@ func RelayTask(c *gin.Context) {
 		task.PrivateData.UpstreamTaskID = result.UpstreamTaskID
 		task.PrivateData.BillingSource = relayInfo.BillingSource
 		task.PrivateData.SubscriptionId = relayInfo.SubscriptionId
+		task.PrivateData.SubscriptionMeterType = relayInfo.SubscriptionMeterType
 		task.PrivateData.TokenId = relayInfo.TokenId
 		task.PrivateData.BillingContext = &model.TaskBillingContext{
 			ModelPrice:      relayInfo.PriceData.ModelPrice,
@@ -584,6 +597,9 @@ func RelayTask(c *gin.Context) {
 			PerCallBilling:  common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) || relayInfo.PriceData.UsePrice,
 		}
 		task.Quota = result.Quota
+		if relayInfo.SubscriptionMeterType == model.SubscriptionMeterRequestCount {
+			task.Quota = 1
+		}
 		task.Data = result.TaskData
 		task.Action = relayInfo.Action
 		if insertErr := task.Insert(); insertErr != nil {

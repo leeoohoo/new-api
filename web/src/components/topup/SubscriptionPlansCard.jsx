@@ -37,6 +37,9 @@ import SubscriptionPurchaseModal from './modals/SubscriptionPurchaseModal';
 import {
   formatSubscriptionDuration,
   formatSubscriptionResetPeriod,
+  formatSubscriptionAmount,
+  getSubscriptionAmountLabel,
+  getSubscriptionMeterType,
 } from '../../helpers/subscriptionFormat';
 
 const { Text } = Typography;
@@ -202,6 +205,12 @@ const SubscriptionPlansCard = ({
   const hasActiveSubscription = activeSubscriptions.length > 0;
   const hasAnySubscription = allSubscriptions.length > 0;
   const disableSubscriptionPreference = !hasActiveSubscription;
+  const hasActiveRequestCountSubscription = activeSubscriptions.some(
+    (item) =>
+      getSubscriptionMeterType({
+        meter_type: item?.subscription?.meter_type || 'quota',
+      }) === 'request_count',
+  );
   const isSubscriptionPreference =
     billingPreference === 'subscription_first' ||
     billingPreference === 'subscription_only';
@@ -373,6 +382,11 @@ const SubscriptionPlansCard = ({
                 {t('，当前无生效订阅，将自动使用钱包')}
               </Text>
             )}
+            {hasActiveRequestCountSubscription && (
+              <Text type='tertiary' size='small'>
+                {t('当前存在按次数订阅，请求会优先按订阅计次，不受钱包优先设置影响')}
+              </Text>
+            )}
 
             {hasAnySubscription ? (
               <>
@@ -396,6 +410,10 @@ const SubscriptionPlansCard = ({
                     const isCancelled = subscription?.status === 'cancelled';
                     const isActive =
                       subscription?.status === 'active' && !isExpired;
+                    const planLike = {
+                      meter_type: subscription?.meter_type || 'quota',
+                    };
+                    const amountLabel = getSubscriptionAmountLabel(planLike, t);
 
                     return (
                       <div key={subscription?.id || subIndex}>
@@ -443,15 +461,37 @@ const SubscriptionPlansCard = ({
                           ).toLocaleString()}
                         </div>
                         <div className='text-xs text-gray-500 mb-2'>
-                          {t('总额度')}:{' '}
+                          {amountLabel}:{' '}
                           {totalAmount > 0 ? (
                             <Tooltip
-                              content={`${t('原生额度')}：${usedAmount}/${totalAmount} · ${t('剩余')} ${remainAmount}`}
+                              content={
+                                getSubscriptionMeterType(planLike) ===
+                                'request_count'
+                                  ? `${t('原始次数')}：${usedAmount}/${totalAmount} · ${t('剩余')} ${remainAmount}`
+                                  : `${t('原生额度')}：${usedAmount}/${totalAmount} · ${t('剩余')} ${remainAmount}`
+                              }
                             >
                               <span>
-                                {renderQuota(usedAmount)}/
-                                {renderQuota(totalAmount)} · {t('剩余')}{' '}
-                                {renderQuota(remainAmount)}
+                                {formatSubscriptionAmount(
+                                  planLike,
+                                  usedAmount,
+                                  t,
+                                  renderQuota,
+                                )}
+                                /
+                                {formatSubscriptionAmount(
+                                  planLike,
+                                  totalAmount,
+                                  t,
+                                  renderQuota,
+                                )}{' '}
+                                · {t('剩余')}{' '}
+                                {formatSubscriptionAmount(
+                                  planLike,
+                                  remainAmount,
+                                  t,
+                                  renderQuota,
+                                )}
                               </span>
                             </Tooltip>
                           ) : (
@@ -491,17 +531,23 @@ const SubscriptionPlansCard = ({
                 const isPopular = index === 0 && plans.length > 1;
                 const limit = Number(plan?.max_purchase_per_user || 0);
                 const limitLabel = limit > 0 ? `${t('限购')} ${limit}` : null;
+                const amountLabel = getSubscriptionAmountLabel(plan, t);
                 const totalLabel =
                   totalAmount > 0
-                    ? `${t('总额度')}: ${renderQuota(totalAmount)}`
-                    : `${t('总额度')}: ${t('不限')}`;
+                    ? `${amountLabel}: ${formatSubscriptionAmount(
+                        plan,
+                        totalAmount,
+                        t,
+                        renderQuota,
+                      )}`
+                    : `${amountLabel}: ${t('不限')}`;
                 const upgradeLabel = plan?.upgrade_group
                   ? `${t('升级分组')}: ${plan.upgrade_group}`
                   : null;
                 const resetLabel =
                   formatSubscriptionResetPeriod(plan, t) === t('不重置')
                     ? null
-                    : `${t('额度重置')}: ${formatSubscriptionResetPeriod(plan, t)}`;
+                    : `${t('周期重置')}: ${formatSubscriptionResetPeriod(plan, t)}`;
                 const planBenefits = [
                   {
                     label: `${t('有效期')}: ${formatSubscriptionDuration(plan, t)}`,

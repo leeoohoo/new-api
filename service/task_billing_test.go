@@ -4,13 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -42,7 +45,9 @@ func TestMain(m *testing.M) {
 		&model.Token{},
 		&model.Log{},
 		&model.Channel{},
+		&model.SubscriptionPlan{},
 		&model.UserSubscription{},
+		&model.SubscriptionPreConsumeRecord{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
 	}
@@ -62,7 +67,9 @@ func truncate(t *testing.T) {
 		model.DB.Exec("DELETE FROM tokens")
 		model.DB.Exec("DELETE FROM logs")
 		model.DB.Exec("DELETE FROM channels")
+		model.DB.Exec("DELETE FROM subscription_pre_consume_records")
 		model.DB.Exec("DELETE FROM user_subscriptions")
+		model.DB.Exec("DELETE FROM subscription_plans")
 	})
 }
 
@@ -93,11 +100,45 @@ func seedSubscription(t *testing.T, id int, userId int, amountTotal int64, amoun
 		UserId:      userId,
 		AmountTotal: amountTotal,
 		AmountUsed:  amountUsed,
+		MeterType:   model.SubscriptionMeterQuota,
 		Status:      "active",
 		StartTime:   time.Now().Unix(),
 		EndTime:     time.Now().Add(30 * 24 * time.Hour).Unix(),
 	}
 	require.NoError(t, model.DB.Create(sub).Error)
+}
+
+func seedSubscriptionWithMeterType(t *testing.T, id int, userId int, amountTotal int64, amountUsed int64, meterType string) {
+	t.Helper()
+	sub := &model.UserSubscription{
+		Id:          id,
+		UserId:      userId,
+		AmountTotal: amountTotal,
+		AmountUsed:  amountUsed,
+		MeterType:   meterType,
+		Status:      "active",
+		StartTime:   time.Now().Unix(),
+		EndTime:     time.Now().Add(30 * 24 * time.Hour).Unix(),
+	}
+	require.NoError(t, model.DB.Create(sub).Error)
+}
+
+func seedSubscriptionPlan(t *testing.T, id int, meterType string, totalAmount int64) {
+	t.Helper()
+	plan := &model.SubscriptionPlan{
+		Id:                      id,
+		Title:                   "test plan",
+		PriceAmount:             9.9,
+		Currency:                "USD",
+		DurationUnit:            model.SubscriptionDurationMonth,
+		DurationValue:           1,
+		TotalAmount:             totalAmount,
+		MeterType:               meterType,
+		QuotaResetPeriod:        model.SubscriptionResetNever,
+		QuotaResetCustomSeconds: 0,
+		Enabled:                 true,
+	}
+	require.NoError(t, model.DB.Create(plan).Error)
 }
 
 func seedChannel(t *testing.T, id int) {
@@ -121,9 +162,10 @@ func makeTask(userId, channelId, quota, tokenId int, billingSource string, subsc
 			OriginModelName: "test-model",
 		},
 		PrivateData: model.TaskPrivateData{
-			BillingSource:  billingSource,
-			SubscriptionId: subscriptionId,
-			TokenId:        tokenId,
+			BillingSource:         billingSource,
+			SubscriptionId:        subscriptionId,
+			SubscriptionMeterType: model.SubscriptionMeterQuota,
+			TokenId:               tokenId,
 			BillingContext: &model.TaskBillingContext{
 				ModelPrice:      0.02,
 				GroupRatio:      1.0,
@@ -244,6 +286,129 @@ func TestRefundTaskQuota_Subscription(t *testing.T) {
 	log := getLastLog(t)
 	require.NotNil(t, log)
 	assert.Equal(t, model.LogTypeRefund, log.Type)
+}
+
+func TestRefundTaskQuota_RequestCountSubscription(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const userID, tokenID, channelID, subID = 40, 40, 40, 40
+	const taskQuota = 5000
+	const subTotal, subUsed int64 = 100, 10
+	const tokenRemain = 8000
+
+	seedUser(t, userID, 0)
+	seedToken(t, tokenID, userID, "sk-sub-request-count", tokenRemain)
+	seedChannel(t, channelID)
+	seedSubscriptionWithMeterType(t, subID, userID, subTotal, subUsed, model.SubscriptionMeterRequestCount)
+
+	task := makeTask(userID, channelID, taskQuota, tokenID, BillingSourceSubscription, subID)
+	task.PrivateData.SubscriptionMeterType = model.SubscriptionMeterRequestCount
+
+	RefundTaskQuota(ctx, task, "request count task failed")
+
+	assert.Equal(t, subUsed-1, getSubscriptionUsed(t, subID))
+	assert.Equal(t, tokenRemain, getTokenRemainQuota(t, tokenID))
+
+	log := getLastLog(t)
+	require.NotNil(t, log)
+	assert.Equal(t, model.LogTypeRefund, log.Type)
+	assert.Equal(t, 1, log.Quota)
+}
+
+func TestValidateUserToken_RequestCountSubscriptionAllowsExhaustedToken(t *testing.T) {
+	truncate(t)
+
+	const userID, tokenID = 50, 50
+	const subID = 50
+
+	seedUser(t, userID, 0)
+	seedToken(t, tokenID, userID, "sk-request-count-auth", 0)
+	seedSubscriptionWithMeterType(t, subID, userID, 100, 3, model.SubscriptionMeterRequestCount)
+
+	require.NoError(t, model.DB.Model(&model.Token{}).
+		Where("id = ?", tokenID).
+		Updates(map[string]interface{}{
+			"status":       common.TokenStatusExhausted,
+			"remain_quota": 0,
+		}).Error)
+
+	token, err := model.ValidateUserToken("sk-request-count-auth")
+	require.NoError(t, err)
+	require.NotNil(t, token)
+	assert.Equal(t, tokenID, token.Id)
+}
+
+func TestValidateUserToken_ExhaustedTokenWithoutRequestCountSubscriptionRejected(t *testing.T) {
+	truncate(t)
+
+	const userID, tokenID = 51, 51
+
+	seedUser(t, userID, 0)
+	seedToken(t, tokenID, userID, "sk-no-request-count-auth", 0)
+
+	require.NoError(t, model.DB.Model(&model.Token{}).
+		Where("id = ?", tokenID).
+		Updates(map[string]interface{}{
+			"status":       common.TokenStatusExhausted,
+			"remain_quota": 0,
+		}).Error)
+
+	token, err := model.ValidateUserToken("sk-no-request-count-auth")
+	require.ErrorIs(t, err, model.ErrTokenInvalid)
+	require.NotNil(t, token)
+}
+
+func TestNewBillingSession_RequestCountSubscriptionOverridesWalletPreference(t *testing.T) {
+	truncate(t)
+	gin.SetMode(gin.TestMode)
+
+	const userID, tokenID = 60, 60
+	const subID, planID = 60, 60
+
+	seedUser(t, userID, 0)
+	seedToken(t, tokenID, userID, "sk-request-count-billing", 0)
+	seedSubscriptionPlan(t, planID, model.SubscriptionMeterRequestCount, 100)
+
+	sub := &model.UserSubscription{
+		Id:          subID,
+		UserId:      userID,
+		PlanId:      planID,
+		AmountTotal: 100,
+		AmountUsed:  10,
+		MeterType:   model.SubscriptionMeterRequestCount,
+		Status:      "active",
+		StartTime:   time.Now().Unix(),
+		EndTime:     time.Now().Add(30 * 24 * time.Hour).Unix(),
+	}
+	require.NoError(t, model.DB.Create(sub).Error)
+
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	ctx.Set("token_quota", 0)
+	ctx.Set("token_unlimited_quota", false)
+
+	relayInfo := &relaycommon.RelayInfo{
+		UserId:          userID,
+		TokenId:         tokenID,
+		TokenKey:        "sk-request-count-billing",
+		TokenUnlimited:  false,
+		OriginModelName: "gpt-4o",
+		RequestId:       "req-request-count-billing",
+		UserSetting: dto.UserSetting{
+			BillingPreference: "wallet_only",
+		},
+	}
+
+	session, apiErr := NewBillingSession(ctx, relayInfo, 5000)
+	require.Nil(t, apiErr)
+	require.NotNil(t, session)
+	assert.Equal(t, BillingSourceSubscription, relayInfo.BillingSource)
+	assert.Equal(t, model.SubscriptionMeterRequestCount, relayInfo.SubscriptionMeterType)
+	assert.Equal(t, 1, session.preConsumedQuota)
+	assert.True(t, session.skipTokenQuota)
+	assert.Equal(t, 0, getTokenRemainQuota(t, tokenID))
+	assert.Equal(t, int64(11), getSubscriptionUsed(t, subID))
 }
 
 func TestRefundTaskQuota_ZeroQuota(t *testing.T) {

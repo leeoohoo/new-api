@@ -650,7 +650,11 @@ export const useLogsData = () => {
         const planId = other?.subscription_plan_id;
         const planTitle = other?.subscription_plan_title || '';
         const subscriptionId = other?.subscription_id;
-        const unit = t('额度');
+        const meterType =
+          other?.subscription_meter_type === 'request_count'
+            ? 'request_count'
+            : 'quota';
+        const unit = meterType === 'request_count' ? t('次') : t('额度');
         const pre = other?.subscription_pre_consumed ?? 0;
         const postDelta = other?.subscription_post_delta ?? 0;
         const finalConsumed = other?.subscription_consumed ?? pre + postDelta;
@@ -690,9 +694,12 @@ export const useLogsData = () => {
         }
         expandDataLocal.push({
           key: t('订阅说明'),
-          value: t(
-            'token 会按倍率换算成“额度/次数”，请求结束后再做差额结算（补扣/返还）。',
-          ),
+          value:
+            meterType === 'request_count'
+              ? t('当前为按次数订阅：成功请求固定消耗 1 次，失败会退回。')
+              : t(
+                  '当前为按额度订阅：token 会按倍率换算成额度，请求结束后再做差额结算（补扣/返还）。',
+                ),
         });
       }
       if (isAdminUser && logs[i].type !== 6) {

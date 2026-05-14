@@ -1,0 +1,5 @@
+token=npm
+workdir=/Users/lilei/project/work/zj/new-api/web
+cmd=npm run dev -- --host 0.0.0.0 --port 5173 --strictPort
+port=5173
+started_at=2026-04-17 15:40:22

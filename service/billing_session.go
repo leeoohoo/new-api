@@ -30,6 +30,7 @@ type BillingSession struct {
 	fundingSettled   bool // funding.Settle 已成功，资金来源已提交
 	settled          bool // Settle 全部完成（资金 + 令牌）
 	refunded         bool // Refund 已调用
+	skipTokenQuota   bool // 对 request_count 订阅跳过 token quota 预扣/退还/结算
 	mu               sync.Mutex
 }
 
@@ -42,8 +43,21 @@ func (s *BillingSession) Settle(actualQuota int) error {
 	if s.settled {
 		return nil
 	}
+	if s.skipTokenQuota {
+		if !s.fundingSettled {
+			if err := s.funding.Settle(0); err != nil {
+				return err
+			}
+			s.fundingSettled = true
+		}
+		s.settled = true
+		return nil
+	}
 	delta := actualQuota - s.preConsumedQuota
 	if delta == 0 {
+		if !s.fundingSettled {
+			s.fundingSettled = true
+		}
 		s.settled = true
 		return nil
 	}
@@ -158,7 +172,7 @@ func (s *BillingSession) preConsume(c *gin.Context, quota int) *types.NewAPIErro
 	}
 
 	// ---- 1) 预扣令牌额度 ----
-	if effectiveQuota > 0 {
+	if effectiveQuota > 0 && !s.skipTokenQuota {
 		if err := PreConsumeTokenQuota(s.relayInfo, effectiveQuota); err != nil {
 			return types.NewErrorWithStatusCode(err, types.ErrorCodePreConsumeTokenQuotaFailed, http.StatusForbidden, types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
 		}
@@ -241,9 +255,11 @@ func (s *BillingSession) syncRelayInfo() {
 		info.SubscriptionAmountUsedAfterPreConsume = sub.AmountUsedAfter
 		info.SubscriptionPlanId = sub.PlanId
 		info.SubscriptionPlanTitle = sub.PlanTitle
+		info.SubscriptionMeterType = sub.meterType
 	} else {
 		info.SubscriptionId = 0
 		info.SubscriptionPreConsumed = 0
+		info.SubscriptionMeterType = ""
 	}
 }
 
@@ -258,6 +274,13 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 	}
 
 	pref := common.NormalizeBillingPreference(relayInfo.UserSetting.BillingPreference)
+	requestCountActive, requestCountErr := model.HasActiveRequestCountSubscription(relayInfo.UserId)
+	if requestCountErr != nil {
+		return nil, types.NewError(requestCountErr, types.ErrorCodeQueryDataError, types.ErrOptionWithSkipRetry())
+	}
+	if requestCountActive {
+		pref = "subscription_only"
+	}
 
 	// 钱包路径需要先检查用户额度
 	tryWallet := func() (*BillingSession, *types.NewAPIError) {
@@ -290,17 +313,33 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 	}
 
 	trySubscription := func() (*BillingSession, *types.NewAPIError) {
+		meterType, hasSub, err := model.GetActiveUserSubscriptionMeterType(relayInfo.UserId)
+		if err != nil {
+			return nil, types.NewError(err, types.ErrorCodeQueryDataError, types.ErrOptionWithSkipRetry())
+		}
+		if !hasSub {
+			return nil, types.NewErrorWithStatusCode(
+				fmt.Errorf("用户没有可用订阅"),
+				types.ErrorCodeInsufficientUserQuota, http.StatusForbidden,
+				types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
+		}
 		subConsume := int64(preConsumedQuota)
-		if subConsume <= 0 {
+		skipTokenQuota := false
+		if meterType == model.SubscriptionMeterRequestCount {
+			subConsume = 1
+			skipTokenQuota = true
+		} else if subConsume <= 0 {
 			subConsume = 1
 		}
 		session := &BillingSession{
-			relayInfo: relayInfo,
+			relayInfo:      relayInfo,
+			skipTokenQuota: skipTokenQuota,
 			funding: &SubscriptionFunding{
 				requestId: relayInfo.RequestId,
 				userId:    relayInfo.UserId,
 				modelName: relayInfo.OriginModelName,
 				amount:    subConsume,
+				meterType: meterType,
 			},
 		}
 		// 必须传 subConsume 而非 preConsumedQuota，保证 SubscriptionFunding.amount、

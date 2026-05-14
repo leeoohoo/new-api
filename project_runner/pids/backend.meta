@@ -1,0 +1,5 @@
+token=new-api
+workdir=/Users/lilei/project/work/zj/new-api
+cmd="/Users/lilei/project/work/zj/new-api/project_runner/bin/new-api" --port 3000
+port=3000
+started_at=2026-04-17 15:40:19

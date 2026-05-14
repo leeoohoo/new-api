@@ -64,6 +64,11 @@ const resetPeriodOptions = [
   { value: 'custom', label: '自定义(秒)' },
 ];
 
+const meterTypeOptions = [
+  { value: 'quota', label: '额度' },
+  { value: 'request_count', label: '次数' },
+];
+
 const AddEditSubscriptionModal = ({
   visible,
   handleClose,
@@ -93,6 +98,7 @@ const AddEditSubscriptionModal = ({
     enabled: true,
     sort_order: 0,
     max_purchase_per_user: 0,
+    meter_type: 'quota',
     total_amount: 0,
     upgrade_group: '',
     stripe_price_id: '',
@@ -117,9 +123,11 @@ const AddEditSubscriptionModal = ({
       enabled: p.enabled !== false,
       sort_order: Number(p.sort_order || 0),
       max_purchase_per_user: Number(p.max_purchase_per_user || 0),
-      total_amount: Number(
-        quotaToDisplayAmount(p.total_amount || 0).toFixed(2),
-      ),
+      meter_type: p.meter_type || 'quota',
+      total_amount:
+        (p.meter_type || 'quota') === 'request_count'
+          ? Number(p.total_amount || 0)
+          : Number(quotaToDisplayAmount(p.total_amount || 0).toFixed(2)),
       upgrade_group: p.upgrade_group || '',
       stripe_price_id: p.stripe_price_id || '',
       creem_product_id: p.creem_product_id || '',
@@ -148,6 +156,7 @@ const AddEditSubscriptionModal = ({
     }
     setLoading(true);
     try {
+      const meterType = values.meter_type || 'quota';
       const payload = {
         plan: {
           ...values,
@@ -162,7 +171,11 @@ const AddEditSubscriptionModal = ({
               : 0,
           sort_order: Number(values.sort_order || 0),
           max_purchase_per_user: Number(values.max_purchase_per_user || 0),
-          total_amount: displayAmountToQuota(values.total_amount),
+          meter_type: meterType,
+          total_amount:
+            meterType === 'request_count'
+              ? Number(values.total_amount || 0)
+              : displayAmountToQuota(values.total_amount),
           upgrade_group: values.upgrade_group || '',
         },
       };
@@ -296,6 +309,18 @@ const AddEditSubscriptionModal = ({
                     </Col>
 
                     <Col span={12}>
+                      <Form.Select
+                        field='meter_type'
+                        label={t('计量类型')}
+                        optionList={meterTypeOptions.map((item) => ({
+                          value: item.value,
+                          label: t(item.label),
+                        }))}
+                        style={{ width: '100%' }}
+                      />
+                    </Col>
+
+                    <Col span={12}>
                       <Form.InputNumber
                         field='price_amount'
                         label={t('实付金额')}
@@ -310,14 +335,32 @@ const AddEditSubscriptionModal = ({
                     <Col span={12}>
                       <Form.InputNumber
                         field='total_amount'
-                        label={t('总额度')}
+                        label={
+                          values.meter_type === 'request_count'
+                            ? t('总次数')
+                            : t('总额度')
+                        }
                         required
                         min={0}
-                        precision={2}
-                        rules={[{ required: true, message: t('请输入总额度') }]}
-                        extraText={`${t('0 表示不限')} · ${t('原生额度')}：${displayAmountToQuota(
-                          values.total_amount,
-                        )}`}
+                        precision={
+                          values.meter_type === 'request_count' ? 0 : 2
+                        }
+                        rules={[
+                          {
+                            required: true,
+                            message:
+                              values.meter_type === 'request_count'
+                                ? t('请输入总次数')
+                                : t('请输入总额度'),
+                          },
+                        ]}
+                        extraText={
+                          values.meter_type === 'request_count'
+                            ? t('次数套餐需填写大于 0 的总次数')
+                            : `${t('0 表示不限')} · ${t('原生额度')}：${displayAmountToQuota(
+                                values.total_amount,
+                              )}`
+                        }
                         style={{ width: '100%' }}
                       />
                     </Col>
