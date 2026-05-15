@@ -18,6 +18,28 @@ import (
 	"gorm.io/gorm"
 )
 
+const (
+	ChannelBillingTypeQuota        = "quota"
+	ChannelBillingTypeRequestCount = "request_count"
+)
+
+func NormalizeChannelBillingType(billingType string) string {
+	normalized := strings.TrimSpace(strings.ToLower(billingType))
+	if normalized == "" {
+		return ChannelBillingTypeQuota
+	}
+	return normalized
+}
+
+func IsValidChannelBillingType(billingType string) bool {
+	switch NormalizeChannelBillingType(billingType) {
+	case ChannelBillingTypeQuota, ChannelBillingTypeRequestCount:
+		return true
+	default:
+		return false
+	}
+}
+
 type Channel struct {
 	Id                 int     `json:"id"`
 	Type               int     `json:"type" gorm:"default:0"`
@@ -36,6 +58,7 @@ type Channel struct {
 	BalanceUpdatedTime int64   `json:"balance_updated_time" gorm:"bigint"`
 	Models             string  `json:"models"`
 	Group              string  `json:"group" gorm:"type:varchar(64);default:'default'"`
+	BillingType        string  `json:"billing_type" gorm:"type:varchar(32);not null;default:'quota';index"`
 	UsedQuota          int64   `json:"used_quota" gorm:"bigint;default:0"`
 	ModelMapping       *string `json:"model_mapping" gorm:"type:text"`
 	//MaxInputTokens     *int    `json:"max_input_tokens" gorm:"default:0"`
@@ -247,6 +270,15 @@ func (channel *Channel) GetAutoBan() bool {
 		return false
 	}
 	return *channel.AutoBan == 1
+}
+
+func (channel *Channel) NormalizeBillingType() {
+	channel.BillingType = NormalizeChannelBillingType(channel.BillingType)
+}
+
+func (channel *Channel) BeforeSave(tx *gorm.DB) error {
+	channel.NormalizeBillingType()
+	return nil
 }
 
 func (channel *Channel) Save() error {

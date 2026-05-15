@@ -1,0 +1,5 @@
+
+> react-template@0.1.0 build
+> vite build --logLevel error
+
+Circular chunk: semi-ui -> i18n -> semi-ui. Please adjust the manual chunk logic for these chunks.

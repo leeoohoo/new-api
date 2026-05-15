@@ -51,6 +51,8 @@ import {
 } from '@douyinfe/semi-icons';
 import { FaRandom } from 'react-icons/fa';
 
+const { Text } = Typography;
+
 // Render functions
 const renderType = (type, record = {}, t) => {
   const channelInfo = record?.channel_info;
@@ -144,6 +146,25 @@ const renderTagType = (t) => {
   return (
     <Tag color='light-blue' shape='circle' type='light'>
       {t('标签聚合')}
+    </Tag>
+  );
+};
+
+const renderBillingType = (billingType, t) => {
+  const normalizedBillingType =
+    billingType === 'request_count' ? 'request_count' : 'quota';
+
+  if (normalizedBillingType === 'request_count') {
+    return (
+      <Tag color='orange' shape='circle' type='light'>
+        {t('次数')}
+      </Tag>
+    );
+  }
+
+  return (
+    <Tag color='light-blue' shape='circle' type='light'>
+      {t('额度')}
     </Tag>
   );
 };
@@ -486,6 +507,17 @@ export const getChannelsColumns = ({
         } else {
           return <>{renderTagType(t)}</>;
         }
+      },
+    },
+    {
+      key: COLUMN_KEYS.BILLING_TYPE,
+      title: t('计费类型'),
+      dataIndex: 'billing_type',
+      render: (text, record, index) => {
+        if (record.children === undefined) {
+          return renderBillingType(text, t);
+        }
+        return <Text type='tertiary'>-</Text>;
       },
     },
     {

@@ -168,10 +168,12 @@ export const useModelsData = () => {
   // Sync upstream models/vendors for missing models only
   const syncUpstream = async (opts = {}) => {
     const locale = opts?.locale;
+    const source = opts?.source;
     setSyncing(true);
     try {
       const body = {};
       if (locale) body.locale = locale;
+      if (source) body.source = source;
       const res = await API.post('/api/models/sync_upstream', body);
       const { success, message, data } = res.data || {};
       if (success) {
@@ -197,9 +199,14 @@ export const useModelsData = () => {
   // Preview upstream differences
   const previewUpstreamDiff = async (opts = {}) => {
     const locale = opts?.locale;
+    const source = opts?.source;
     setPreviewing(true);
     try {
-      const url = `/api/models/sync_upstream/preview${locale ? `?locale=${locale}` : ''}`;
+      const params = new URLSearchParams();
+      if (locale) params.set('locale', locale);
+      if (source) params.set('source', source);
+      const query = params.toString();
+      const url = `/api/models/sync_upstream/preview${query ? `?${query}` : ''}`;
       const res = await API.get(url);
       const { success, message, data } = res.data || {};
       if (success) {
@@ -220,10 +227,12 @@ export const useModelsData = () => {
     const isArray = Array.isArray(payloadOrArray);
     const overwrite = isArray ? payloadOrArray : payloadOrArray.overwrite || [];
     const locale = isArray ? undefined : payloadOrArray.locale;
+    const source = isArray ? undefined : payloadOrArray.source;
     setSyncing(true);
     try {
       const body = { overwrite };
       if (locale) body.locale = locale;
+      if (source) body.source = source;
       const res = await API.post('/api/models/sync_upstream', body);
       const { success, message, data } = res.data || {};
       if (success) {
@@ -244,6 +253,31 @@ export const useModelsData = () => {
       return false;
     } catch (e) {
       showError(t('同步失败'));
+      return false;
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  // Upload local models.json to the backend storage path
+  const uploadModelsConfig = async (file) => {
+    if (!file) return false;
+    setSyncing(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await API.post('/api/models/sync_upstream/file', formData);
+      const { success, message, data } = res.data || {};
+      if (success) {
+        showSuccess(
+          t(`已保存 models.json 到 ${data?.path || '项目根目录'}`),
+        );
+        return true;
+      }
+      showError(message || t('上传 models.json 失败'));
+      return false;
+    } catch (e) {
+      showError(t('上传 models.json 失败'));
       return false;
     } finally {
       setSyncing(false);
@@ -493,5 +527,6 @@ export const useModelsData = () => {
     syncUpstream,
     previewUpstreamDiff,
     applyUpstreamOverwrite,
+    uploadModelsConfig,
   };
 };

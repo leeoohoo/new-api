@@ -17,11 +17,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import MissingModelsModal from './modals/MissingModelsModal';
 import PrefillGroupManagement from './modals/PrefillGroupManagement';
 import EditPrefillGroupModal from './modals/EditPrefillGroupModal';
-import { Button, Modal, Popover, RadioGroup, Radio } from '@douyinfe/semi-ui';
+import { Button, Modal, Popover } from '@douyinfe/semi-ui';
 import { showSuccess, showError, copy } from '../../../helpers';
 import CompactModeToggle from '../../common/ui/CompactModeToggle';
 import SelectionNotification from './components/SelectionNotification';
@@ -39,6 +39,7 @@ const ModelsActions = ({
   syncUpstream,
   previewUpstreamDiff,
   applyUpstreamOverwrite,
+  uploadModelsConfig,
   compactMode,
   setCompactMode,
   t,
@@ -53,10 +54,13 @@ const ModelsActions = ({
   const [conflicts, setConflicts] = useState([]);
   const [showSyncModal, setShowSyncModal] = useState(false);
   const [syncLocale, setSyncLocale] = useState('zh');
+  const [syncSource, setSyncSource] = useState('official');
+  const uploadFileRef = useRef(null);
 
-  const handleSyncUpstream = async (locale) => {
+  const handleSyncUpstream = async (locale, source = syncSource) => {
+    setSyncSource(source);
     // 先预览
-    const data = await previewUpstreamDiff?.({ locale });
+    const data = await previewUpstreamDiff?.({ locale, source });
     const conflictItems = data?.conflicts || [];
     if (conflictItems.length > 0) {
       setConflicts(conflictItems);
@@ -64,7 +68,18 @@ const ModelsActions = ({
       return;
     }
     // 无冲突，直接同步缺失
-    await syncUpstream?.({ locale });
+    await syncUpstream?.({ locale, source });
+  };
+
+  const handleUploadClick = () => {
+    uploadFileRef.current?.click();
+  };
+
+  const handleUploadFileChange = async (e) => {
+    const file = e?.target?.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    await uploadModelsConfig?.(file);
   };
 
   // Handle delete selected models with confirmation
@@ -156,12 +171,31 @@ const ModelsActions = ({
             loading={syncing || previewing}
             onClick={() => {
               setSyncLocale('zh');
+              setSyncSource('official');
               setShowSyncModal(true);
             }}
           >
             {t('同步')}
           </Button>
         </Popover>
+
+        <Button
+          type='secondary'
+          className='flex-1 md:flex-initial'
+          size='small'
+          loading={syncing}
+          onClick={handleUploadClick}
+        >
+          {t('上传 models.json')}
+        </Button>
+
+        <input
+          ref={uploadFileRef}
+          type='file'
+          accept='.json'
+          style={{ display: 'none' }}
+          onChange={handleUploadFileChange}
+        />
 
         <Button
           type='secondary'
@@ -209,9 +243,7 @@ const ModelsActions = ({
         t={t}
         onConfirm={async ({ option, locale }) => {
           setSyncLocale(locale);
-          if (option === 'official') {
-            await handleSyncUpstream(locale);
-          }
+          await handleSyncUpstream(locale, option);
           setShowSyncModal(false);
         }}
       />
@@ -247,6 +279,7 @@ const ModelsActions = ({
           return await applyUpstreamOverwrite?.({
             overwrite: payload,
             locale: syncLocale,
+            source: syncSource,
           });
         }}
         t={t}

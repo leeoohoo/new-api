@@ -118,6 +118,13 @@ func appendBillingInfo(relayInfo *relaycommon.RelayInfo, other map[string]interf
 	if relayInfo == nil || other == nil {
 		return
 	}
+	if relayInfo.ChannelMeta != nil {
+		billingType := relayInfo.ChannelMeta.BillingType
+		if billingType == "" {
+			billingType = "quota"
+		}
+		other["channel_billing_type"] = billingType
+	}
 	// billing_source: "wallet" or "subscription"
 	if relayInfo.BillingSource != "" {
 		other["billing_source"] = relayInfo.BillingSource

@@ -385,6 +385,9 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 		other["error_code"] = err.GetErrorCode()
 		other["status_code"] = err.StatusCode
 		other["channel_id"] = channelId
+		if billingType := common.GetContextKeyString(c, constant.ContextKeyChannelBillingType); billingType != "" {
+			other["channel_billing_type"] = billingType
+		}
 		other["channel_name"] = c.GetString("channel_name")
 		other["channel_type"] = c.GetInt("channel_type")
 		adminInfo := make(map[string]interface{})

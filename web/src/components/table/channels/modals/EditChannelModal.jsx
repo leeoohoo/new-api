@@ -184,6 +184,7 @@ const EditChannelModal = (props) => {
     auto_ban: 1,
     test_model: '',
     groups: ['default'],
+    billing_type: 'quota',
     priority: 0,
     weight: 0,
     tag: '',
@@ -951,6 +952,8 @@ const EditChannelModal = (props) => {
       ) {
         data.base_url = 'https://ark.cn-beijing.volces.com';
       }
+
+      data.billing_type = data.billing_type || 'quota';
 
       initialBaseUrlRef.current = data.base_url || '';
       setInputs(data);
@@ -2436,6 +2439,22 @@ const EditChannelModal = (props) => {
                     maxLength={255}
                     showClear
                     onChange={(value) => handleInputChange('remark', value)}
+                  />
+
+                  <Form.Select
+                    field='billing_type'
+                    label={t('计费类型')}
+                    placeholder={t('请选择计费类型')}
+                    rules={[{ required: true, message: t('请选择计费类型') }]}
+                    optionList={[
+                      { value: 'quota', label: t('额度') },
+                      { value: 'request_count', label: t('次数') },
+                    ]}
+                    style={{ width: '100%' }}
+                    onChange={(value) => handleInputChange('billing_type', value)}
+                    extraText={t(
+                      '额度表示该渠道优先按额度订阅计费；次数表示该渠道按调用次数计费。',
+                    )}
                   />
 
                   <Row gutter={12}>

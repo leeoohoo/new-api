@@ -293,6 +293,7 @@ func migrateDB() error {
 			return err
 		}
 	}
+	migrateChannelBillingTypeDefaults()
 	migrateSubscriptionMeterTypeDefaults()
 	return nil
 }
@@ -362,6 +363,7 @@ func migrateDBFast() error {
 			return err
 		}
 	}
+	migrateChannelBillingTypeDefaults()
 	migrateSubscriptionMeterTypeDefaults()
 	common.SysLog("database migrated")
 	return nil
@@ -579,6 +581,17 @@ func migrateSubscriptionMeterTypeDefaults() {
 		_ = DB.Model(&UserSubscription{}).
 			Where("meter_type = '' OR meter_type IS NULL").
 			Update("meter_type", SubscriptionMeterQuota).Error
+	}
+}
+
+func migrateChannelBillingTypeDefaults() {
+	if !DB.Migrator().HasTable("channels") {
+		return
+	}
+	if DB.Migrator().HasColumn(&Channel{}, "billing_type") {
+		_ = DB.Model(&Channel{}).
+			Where("billing_type = '' OR billing_type IS NULL").
+			Update("billing_type", ChannelBillingTypeQuota).Error
 	}
 }
 

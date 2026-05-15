@@ -50,7 +50,7 @@ const SyncWizardModal = ({ visible, onClose, onConfirm, loading, t }) => {
             <Button
               type='primary'
               onClick={() => setStep(1)}
-              disabled={option !== 'official'}
+              disabled={!option}
             >
               {t('下一步')}
             </Button>
@@ -91,7 +91,7 @@ const SyncWizardModal = ({ visible, onClose, onConfirm, loading, t }) => {
             <Radio value='official' extra={t('从官方模型库同步')}>
               {t('官方模型同步')}
             </Radio>
-            <Radio value='config' extra={t('从配置文件同步')} disabled>
+            <Radio value='config' extra={t('从本地 models.json 同步')}>
               {t('配置文件同步')}
             </Radio>
           </RadioGroup>
@@ -101,7 +101,9 @@ const SyncWizardModal = ({ visible, onClose, onConfirm, loading, t }) => {
       {step === 1 && (
         <div className='mt-2'>
           <div className='mb-2 text-[var(--semi-color-text-2)]'>
-            {t('请选择同步语言')}
+            {option === 'config'
+              ? t('本地模式会优先读取项目根目录的 models.json，语言仅在官方同步时生效')
+              : t('请选择同步语言')}
           </div>
           <div className='flex justify-center'>
             <RadioGroup

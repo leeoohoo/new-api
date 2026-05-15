@@ -9,6 +9,8 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -87,6 +89,68 @@ type overwriteField struct {
 type syncRequest struct {
 	Overwrite []overwriteField `json:"overwrite"`
 	Locale    string           `json:"locale"`
+	Source    string           `json:"source"`
+}
+
+func getLocalModelsPath() string {
+	path := common.GetEnvOrDefaultString("MODELS_JSON_PATH", "models.json")
+	if filepath.IsAbs(path) {
+		return path
+	}
+	if wd, err := os.Getwd(); err == nil && wd != "" {
+		return filepath.Join(wd, path)
+	}
+	return path
+}
+
+func shouldUseLocalModels(source string) bool {
+	switch strings.ToLower(strings.TrimSpace(source)) {
+	case "config", "local", "file":
+		return true
+	default:
+		return false
+	}
+}
+
+func decodeUpstreamEnvelope[T any](buf []byte, out *upstreamEnvelope[T]) error {
+	if err := json.Unmarshal(buf, out); err == nil {
+		if !out.Success && len(out.Data) == 0 && out.Message == "" {
+			out.Success = true
+		}
+		return nil
+	}
+	var arr []T
+	if err := json.Unmarshal(buf, &arr); err != nil {
+		return err
+	}
+	out.Success = true
+	out.Message = ""
+	out.Data = arr
+	return nil
+}
+
+func loadUpstreamEnvelopeFromFile[T any](path string, out *upstreamEnvelope[T]) error {
+	buf, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	return decodeUpstreamEnvelope(buf, out)
+}
+
+func resolveModelsEnvelope[T any](ctx context.Context, locale, source string, out *upstreamEnvelope[T]) (map[string]any, error) {
+	modelsURL, _ := getUpstreamURLs(locale)
+	modelsPath := getLocalModelsPath()
+	if shouldUseLocalModels(source) {
+		if err := loadUpstreamEnvelopeFromFile(modelsPath, out); err == nil {
+			return map[string]any{"type": "local", "path": modelsPath}, nil
+		} else if !os.IsNotExist(err) {
+			return map[string]any{"type": "local", "path": modelsPath}, err
+		}
+	}
+	if err := fetchJSON(ctx, modelsURL, out); err != nil {
+		return map[string]any{"type": "remote", "url": modelsURL}, err
+	}
+	return map[string]any{"type": "remote", "url": modelsURL}, nil
 }
 
 func newHTTPClient() *http.Client {
@@ -280,6 +344,10 @@ func SyncUpstreamModels(c *gin.Context) {
 	// 若既无缺失模型需要创建，也未指定覆盖更新字段，则无需请求上游数据，直接返回
 	if len(missing) == 0 && len(req.Overwrite) == 0 {
 		modelsURL, vendorsURL := getUpstreamURLs(req.Locale)
+		modelsSource := gin.H{"type": "remote", "url": modelsURL}
+		if shouldUseLocalModels(req.Source) {
+			modelsSource = gin.H{"type": "local", "path": getLocalModelsPath()}
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
 			"data": gin.H{
@@ -290,9 +358,11 @@ func SyncUpstreamModels(c *gin.Context) {
 				"created_list":    []string{},
 				"updated_list":    []string{},
 				"source": gin.H{
-					"locale":      req.Locale,
-					"models_url":  modelsURL,
-					"vendors_url": vendorsURL,
+					"locale":       req.Locale,
+					"mode":         req.Source,
+					"models_source": modelsSource,
+					"models_url":   modelsURL,
+					"vendors_url":  vendorsURL,
 				},
 			},
 		})
@@ -307,6 +377,7 @@ func SyncUpstreamModels(c *gin.Context) {
 	modelsURL, vendorsURL := getUpstreamURLs(req.Locale)
 	var vendorsEnv upstreamEnvelope[upstreamVendor]
 	var modelsEnv upstreamEnvelope[upstreamModel]
+	var modelsSource map[string]any
 	var fetchErr error
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -317,7 +388,9 @@ func SyncUpstreamModels(c *gin.Context) {
 	}()
 	go func() {
 		defer wg.Done()
-		if err := fetchJSON(ctx, modelsURL, &modelsEnv); err != nil {
+		var err error
+		modelsSource, err = resolveModelsEnvelope(ctx, req.Locale, req.Source, &modelsEnv)
+		if err != nil {
 			fetchErr = err
 		}
 	}()
@@ -460,9 +533,11 @@ func SyncUpstreamModels(c *gin.Context) {
 			"created_list":    createdList,
 			"updated_list":    updatedList,
 			"source": gin.H{
-				"locale":      req.Locale,
-				"models_url":  modelsURL,
-				"vendors_url": vendorsURL,
+				"locale":       req.Locale,
+				"mode":         req.Source,
+				"models_source": modelsSource,
+				"models_url":   modelsURL,
+				"vendors_url":  vendorsURL,
 			},
 		},
 	})
@@ -503,10 +578,12 @@ func SyncUpstreamPreview(c *gin.Context) {
 	defer cancel()
 
 	locale := c.Query("locale")
+	source := c.Query("source")
 	modelsURL, vendorsURL := getUpstreamURLs(locale)
 
 	var vendorsEnv upstreamEnvelope[upstreamVendor]
 	var modelsEnv upstreamEnvelope[upstreamModel]
+	var modelsSource map[string]any
 	var fetchErr error
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -516,7 +593,9 @@ func SyncUpstreamPreview(c *gin.Context) {
 	}()
 	go func() {
 		defer wg.Done()
-		if err := fetchJSON(ctx, modelsURL, &modelsEnv); err != nil {
+		var err error
+		modelsSource, err = resolveModelsEnvelope(ctx, locale, source, &modelsEnv)
+		if err != nil {
 			fetchErr = err
 		}
 	}()
@@ -625,10 +704,65 @@ func SyncUpstreamPreview(c *gin.Context) {
 			"missing":   missing,
 			"conflicts": conflicts,
 			"source": gin.H{
-				"locale":      locale,
-				"models_url":  modelsURL,
-				"vendors_url": vendorsURL,
+				"locale":       locale,
+				"mode":         source,
+				"models_source": modelsSource,
+				"models_url":   modelsURL,
+				"vendors_url":  vendorsURL,
 			},
+		},
+	})
+}
+
+func UploadModelsConfig(c *gin.Context) {
+	fileHeader, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "请先选择 models.json 文件"})
+		return
+	}
+
+	file, err := fileHeader.Open()
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "打开上传文件失败: " + err.Error()})
+		return
+	}
+	defer file.Close()
+
+	data, err := io.ReadAll(file)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "读取上传文件失败: " + err.Error()})
+		return
+	}
+	if len(strings.TrimSpace(string(data))) == 0 {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "上传文件不能为空"})
+		return
+	}
+
+	var preview upstreamEnvelope[json.RawMessage]
+	if err := decodeUpstreamEnvelope(data, &preview); err != nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "models.json 格式不正确: " + err.Error()})
+		return
+	}
+
+	targetPath := getLocalModelsPath()
+	if dir := filepath.Dir(targetPath); dir != "." && dir != "" {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "创建保存目录失败: " + err.Error()})
+			return
+		}
+	}
+
+	if err := os.WriteFile(targetPath, data, 0644); err != nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "保存 models.json 失败: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"path":     targetPath,
+			"filename": fileHeader.Filename,
+			"size":     len(data),
 		},
 	})
 }
