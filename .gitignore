@@ -33,3 +33,5 @@ data/
 token_estimator_test.go
 /.deploy
 deploy_run.log
+/.chatos
+/.tmp
