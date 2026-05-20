@@ -107,21 +107,35 @@ const EditUserModal = (props) => {
 
   const handleCancel = () => props.handleClose();
 
+  const resetAdjustState = () => {
+    setAdjustModalOpen(false);
+    setAdjustQuotaLocal('');
+    setAdjustAmountLocal('');
+    setAdjustMode('add');
+  };
+
   const loadUser = async () => {
     setLoading(true);
-    const url = userId ? `/api/user/${userId}` : `/api/user/self`;
-    const res = await API.get(url);
-    const { success, message, data } = res.data;
-    if (success) {
-      data.password = '';
-      data.quota_amount = Number(
-        quotaToDisplayAmount(data.quota || 0).toFixed(6),
-      );
-      setInputs({ ...getInitValues(), ...data });
-    } else {
+    try {
+      const url = userId ? `/api/user/${userId}` : `/api/user/self`;
+      const res = await API.get(url);
+      const { success, message, data } = res.data;
+      if (success) {
+        data.password = '';
+        data.quota_amount = Number(
+          quotaToDisplayAmount(data.quota || 0).toFixed(6),
+        );
+        setInputs({ ...getInitValues(), ...data });
+        return true;
+      }
       showError(message);
+      return false;
+    } catch (e) {
+      showError(e.message);
+      return false;
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   useEffect(() => {
@@ -181,20 +195,28 @@ const EditUserModal = (props) => {
       });
       const { success, message } = res.data;
       if (success) {
+        resetAdjustState();
+
+        const [refreshResult, detailResult] = await Promise.allSettled([
+          props.refresh(),
+          loadUser(),
+        ]);
+
         showSuccess(t('调整额度成功'));
-        setAdjustModalOpen(false);
-        setAdjustQuotaLocal('');
-        setAdjustAmountLocal('');
-        const userRes = await API.get(`/api/user/${userId}`);
-        if (userRes.data.success) {
-          const data = userRes.data.data;
-          data.password = '';
-          data.quota_amount = Number(
-            quotaToDisplayAmount(data.quota || 0).toFixed(6),
+
+        if (refreshResult.status === 'rejected') {
+          showError(
+            refreshResult.reason?.message ||
+              t('用户列表刷新失败，请手动刷新页面'),
           );
-          setInputs({ ...getInitValues(), ...data });
         }
-        props.refresh();
+
+        if (
+          detailResult.status === 'rejected' ||
+          detailResult.value === false
+        ) {
+          showError(t('用户详情刷新失败，请重新打开用户面板查看最新数据'));
+        }
       } else {
         showError(message);
       }
@@ -465,12 +487,7 @@ const EditUserModal = (props) => {
         centered
         visible={adjustModalOpen}
         onOk={adjustQuota}
-        onCancel={() => {
-          setAdjustModalOpen(false);
-          setAdjustQuotaLocal('');
-          setAdjustAmountLocal('');
-          setAdjustMode('add');
-        }}
+        onCancel={resetAdjustState}
         confirmLoading={adjustLoading}
         closable={null}
         title={

@@ -19,7 +19,6 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React, { useMemo, useState } from 'react';
 import {
-  Banner,
   Button,
   Card,
   Checkbox,
@@ -60,6 +59,7 @@ const PriceInput = ({
   onChange,
   suffix = PRICE_SUFFIX,
   disabled = false,
+  readOnly = false,
   extraText = '',
   headerAction = null,
   hidden = false,
@@ -76,6 +76,7 @@ const PriceInput = ({
         onChange={onChange}
         suffix={suffix}
         disabled={disabled}
+        readOnly={readOnly}
       />
     ) : null}
     {extraText ? (
@@ -384,7 +385,7 @@ export default function ModelPricingEditor({
                   </RadioGroup>
                   <div className='mt-2 text-xs text-gray-500'>
                     {t(
-                      '这个界面默认按价格填写，保存时会自动换算回后端需要的倍率 JSON。',
+                      '这个界面以输入价格为基础，补全/缓存倍率可直接编辑，对应价格会按倍率自动预览。',
                     )}
                   </div>
                 </div>
@@ -431,29 +432,14 @@ export default function ModelPricingEditor({
                         placeholder={t('输入 $/1M tokens')}
                         onChange={(value) => handleNumericFieldChange('inputPrice', value)}
                       />
-                      {selectedModel.completionRatioLocked ? (
-                        <Banner
-                          type='warning'
-                          bordered
-                          fullMode={false}
-                          closeIcon={null}
-                          style={{ marginBottom: 12 }}
-                          title={t('补全价格已锁定')}
-                          description={t(
-                            '该模型补全倍率由后端固定为 {{ratio}}。补全价格不能在这里修改。',
-                            {
-                              ratio: selectedModel.lockedCompletionRatio || '-',
-                            },
-                          )}
-                        />
-                      ) : null}
                       <PriceInput
-                        label={t('补全价格')}
-                        value={selectedModel.completionPrice}
-                        placeholder={t('输入 $/1M tokens')}
+                        label={t('补全倍率')}
+                        value={selectedModel.completionRatioValue}
+                        placeholder={t('输入补全倍率')}
                         onChange={(value) =>
-                          handleNumericFieldChange('completionPrice', value)
+                          handleNumericFieldChange('completionRatioValue', value)
                         }
+                        suffix='x'
                         headerAction={
                           <Switch
                             size='small'
@@ -461,7 +447,6 @@ export default function ModelPricingEditor({
                               selectedModel,
                               'completionPrice',
                             )}
-                            disabled={selectedModel.completionRatioLocked}
                             onChange={(checked) =>
                               handleOptionalFieldToggle('completionPrice', checked)
                             }
@@ -470,31 +455,46 @@ export default function ModelPricingEditor({
                         hidden={
                           !isOptionalFieldEnabled(selectedModel, 'completionPrice')
                         }
-                        disabled={
-                          !hasValue(selectedModel.inputPrice) ||
-                          selectedModel.completionRatioLocked
-                        }
                         extraText={
-                          selectedModel.completionRatioLocked
+                          !isOptionalFieldEnabled(selectedModel, 'completionPrice')
                             ? t(
-                                '后端固定倍率：{{ratio}}。该字段仅展示换算后的价格。',
+                                '当前未启用，需要时再打开即可。',
+                              )
+                            : !hasValue(selectedModel.rawRatios.completionRatio) &&
+                                hasValue(selectedModel.defaultCompletionRatio)
+                              ? t(
+                                  '未显式设置时默认按倍率 {{ratio}} 预览；修改后会保存为显式补全倍率。',
                                 {
-                                  ratio: selectedModel.lockedCompletionRatio || '-',
+                                  ratio: selectedModel.defaultCompletionRatio || '-',
                                 },
                               )
-                            : !isOptionalFieldEnabled(
-                                  selectedModel,
-                                  'completionPrice',
-                                )
-                              ? t('当前未启用，需要时再打开即可。')
                               : ''
                         }
                       />
                       <PriceInput
-                        label={t('缓存读取价格')}
-                        value={selectedModel.cachePrice}
-                        placeholder={t('输入 $/1M tokens')}
-                        onChange={(value) => handleNumericFieldChange('cachePrice', value)}
+                        label={t('补全价格预览')}
+                        value={selectedModel.completionPrice}
+                        placeholder={t('填写输入价格后自动预览')}
+                        onChange={() => {}}
+                        hidden={
+                          !isOptionalFieldEnabled(selectedModel, 'completionPrice')
+                        }
+                        disabled
+                        readOnly
+                        extraText={
+                          hasValue(selectedModel.inputPrice)
+                            ? t('按输入价格 × 补全倍率自动计算，仅用于预览。')
+                            : t('请先填写输入价格以查看补全价格预览。')
+                        }
+                      />
+                      <PriceInput
+                        label={t('缓存读取倍率')}
+                        value={selectedModel.cacheRatioValue}
+                        placeholder={t('输入缓存读取倍率')}
+                        onChange={(value) =>
+                          handleNumericFieldChange('cacheRatioValue', value)
+                        }
+                        suffix='x'
                         headerAction={
                           <Switch
                             size='small'
@@ -505,20 +505,34 @@ export default function ModelPricingEditor({
                           />
                         }
                         hidden={!isOptionalFieldEnabled(selectedModel, 'cachePrice')}
-                        disabled={!hasValue(selectedModel.inputPrice)}
                         extraText={
                           !isOptionalFieldEnabled(selectedModel, 'cachePrice')
                             ? t('当前未启用，需要时再打开即可。')
-                            : ''
+                            : t('按输入价格 × 缓存读取倍率自动计算缓存读取价格，仅用于预览。')
                         }
                       />
                       <PriceInput
-                        label={t('缓存创建价格')}
-                        value={selectedModel.createCachePrice}
-                        placeholder={t('输入 $/1M tokens')}
-                        onChange={(value) =>
-                          handleNumericFieldChange('createCachePrice', value)
+                        label={t('缓存读取价格预览')}
+                        value={selectedModel.cachePrice}
+                        placeholder={t('填写输入价格后自动预览')}
+                        onChange={() => {}}
+                        hidden={!isOptionalFieldEnabled(selectedModel, 'cachePrice')}
+                        disabled
+                        readOnly
+                        extraText={
+                          hasValue(selectedModel.inputPrice)
+                            ? t('按输入价格 × 缓存读取倍率自动计算，仅用于预览。')
+                            : t('请先填写输入价格以查看缓存读取价格预览。')
                         }
+                      />
+                      <PriceInput
+                        label={t('缓存创建倍率')}
+                        value={selectedModel.createCacheRatioValue}
+                        placeholder={t('输入缓存创建倍率')}
+                        onChange={(value) =>
+                          handleNumericFieldChange('createCacheRatioValue', value)
+                        }
+                        suffix='x'
                         headerAction={
                           <Switch
                             size='small'
@@ -534,14 +548,29 @@ export default function ModelPricingEditor({
                         hidden={
                           !isOptionalFieldEnabled(selectedModel, 'createCachePrice')
                         }
-                        disabled={!hasValue(selectedModel.inputPrice)}
                         extraText={
                           !isOptionalFieldEnabled(
                             selectedModel,
                             'createCachePrice',
                           )
                             ? t('当前未启用，需要时再打开即可。')
-                            : ''
+                            : t('按输入价格 × 缓存创建倍率自动计算缓存创建价格，仅用于预览。')
+                        }
+                      />
+                      <PriceInput
+                        label={t('缓存创建价格预览')}
+                        value={selectedModel.createCachePrice}
+                        placeholder={t('填写输入价格后自动预览')}
+                        onChange={() => {}}
+                        hidden={
+                          !isOptionalFieldEnabled(selectedModel, 'createCachePrice')
+                        }
+                        disabled
+                        readOnly
+                        extraText={
+                          hasValue(selectedModel.inputPrice)
+                            ? t('按输入价格 × 缓存创建倍率自动计算，仅用于预览。')
+                            : t('请先填写输入价格以查看缓存创建价格预览。')
                         }
                       />
                     </Card>

@@ -19,6 +19,55 @@ For commercial licensing, please contact support@quantumnous.com
 
 import { API } from './api';
 
+const LOCAL_ADDRESS_HOSTS = new Set([
+  'localhost',
+  '127.0.0.1',
+  '0.0.0.0',
+  '::1',
+]);
+
+function getBrowserOrigin() {
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return window.location.origin;
+  }
+  return '';
+}
+
+function isLocalAddressHost(hostname = '') {
+  return LOCAL_ADDRESS_HOSTS.has((hostname || '').trim().toLowerCase());
+}
+
+/**
+ * 解析最终应使用的服务地址：
+ * - 优先使用显式配置的外部地址
+ * - 若配置为空，或仍是 localhost/127.0.0.1/0.0.0.0/::1，则回退到当前访问域名
+ * @param {string} serverAddress
+ * @param {string} fallbackOrigin
+ * @returns {string}
+ */
+export function resolveServerAddress(
+  serverAddress,
+  fallbackOrigin = getBrowserOrigin(),
+) {
+  const normalized = (serverAddress || '').trim();
+  if (!normalized) {
+    return fallbackOrigin;
+  }
+
+  try {
+    const parsed = new URL(normalized);
+    if (isLocalAddressHost(parsed.hostname)) {
+      return fallbackOrigin;
+    }
+    return normalized;
+  } catch (_) {
+    if (isLocalAddressHost(normalized.replace(/^\[(.*)\]$/, '$1').split(':')[0])) {
+      return fallbackOrigin;
+    }
+    return normalized;
+  }
+}
+
 /**
  * 按需获取单个令牌的真实 key
  * @param {number|string} tokenId
@@ -88,11 +137,7 @@ export function getServerAddress() {
     }
   }
 
-  if (!serverAddress) {
-    serverAddress = window.location.origin;
-  }
-
-  return serverAddress;
+  return resolveServerAddress(serverAddress);
 }
 
 export const CHANNEL_CONN_CLIPBOARD_TYPE = 'newapi_channel_conn';
