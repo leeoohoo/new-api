@@ -40,9 +40,7 @@ import {
   showSuccess,
   toBoolean,
 } from '../../helpers';
-import axios from 'axios';
 import { useTranslation } from 'react-i18next';
-import CustomOAuthSetting from './CustomOAuthSetting';
 
 const SystemSetting = () => {
   const { t } = useTranslation();
@@ -50,19 +48,6 @@ const SystemSetting = () => {
     PasswordLoginEnabled: '',
     PasswordRegisterEnabled: '',
     EmailVerificationEnabled: '',
-    GitHubOAuthEnabled: '',
-    GitHubClientId: '',
-    GitHubClientSecret: '',
-    'discord.enabled': '',
-    'discord.client_id': '',
-    'discord.client_secret': '',
-    'oidc.enabled': '',
-    'oidc.client_id': '',
-    'oidc.client_secret': '',
-    'oidc.well_known': '',
-    'oidc.authorization_endpoint': '',
-    'oidc.token_endpoint': '',
-    'oidc.user_info_endpoint': '',
     Notice: '',
     SMTPServer: '',
     SMTPPort: '',
@@ -73,10 +58,6 @@ const SystemSetting = () => {
     WorkerValidKey: '',
     WorkerAllowHttpImageRequestEnabled: '',
     Footer: '',
-    WeChatAuthEnabled: '',
-    WeChatServerAddress: '',
-    WeChatServerToken: '',
-    WeChatAccountQRCodeImageURL: '',
     TurnstileCheckEnabled: '',
     TurnstileSiteKey: '',
     TurnstileSecretKey: '',
@@ -93,13 +74,6 @@ const SystemSetting = () => {
     SMTPSSLEnabled: '',
     SMTPForceAuthLogin: '',
     EmailDomainWhitelist: [],
-    TelegramOAuthEnabled: '',
-    TelegramBotToken: '',
-    TelegramBotName: '',
-    LinuxDOOAuthEnabled: '',
-    LinuxDOClientId: '',
-    LinuxDOClientSecret: '',
-    LinuxDOMinimumTrustLevel: '',
     ServerAddress: '',
     // SSRF防护配置
     'fetch_setting.enable_ssrf_protection': true,
@@ -119,7 +93,6 @@ const SystemSetting = () => {
   const [emailDomainWhitelist, setEmailDomainWhitelist] = useState([]);
   const [showPasswordLoginConfirmModal, setShowPasswordLoginConfirmModal] =
     useState(false);
-  const [linuxDOOAuthEnabled, setLinuxDOOAuthEnabled] = useState(false);
   const [emailToAdd, setEmailToAdd] = useState('');
   const [domainFilterMode, setDomainFilterMode] = useState(true);
   const [ipFilterMode, setIpFilterMode] = useState(true);
@@ -175,18 +148,12 @@ const SystemSetting = () => {
           case 'PasswordLoginEnabled':
           case 'PasswordRegisterEnabled':
           case 'EmailVerificationEnabled':
-          case 'GitHubOAuthEnabled':
-          case 'WeChatAuthEnabled':
-          case 'TelegramOAuthEnabled':
           case 'RegisterEnabled':
           case 'TurnstileCheckEnabled':
           case 'EmailDomainRestrictionEnabled':
           case 'EmailAliasRestrictionEnabled':
           case 'SMTPSSLEnabled':
           case 'SMTPForceAuthLogin':
-          case 'LinuxDOOAuthEnabled':
-          case 'discord.enabled':
-          case 'oidc.enabled':
           case 'passkey.enabled':
           case 'passkey.allow_insecure_origin':
           case 'WorkerAllowHttpImageRequestEnabled':
@@ -426,168 +393,6 @@ const SystemSetting = () => {
     }
   };
 
-  const submitWeChat = async () => {
-    const options = [];
-
-    if (originInputs['WeChatServerAddress'] !== inputs.WeChatServerAddress) {
-      options.push({
-        key: 'WeChatServerAddress',
-        value: removeTrailingSlash(inputs.WeChatServerAddress),
-      });
-    }
-    if (
-      originInputs['WeChatAccountQRCodeImageURL'] !==
-      inputs.WeChatAccountQRCodeImageURL
-    ) {
-      options.push({
-        key: 'WeChatAccountQRCodeImageURL',
-        value: inputs.WeChatAccountQRCodeImageURL,
-      });
-    }
-    if (
-      originInputs['WeChatServerToken'] !== inputs.WeChatServerToken &&
-      inputs.WeChatServerToken !== ''
-    ) {
-      options.push({
-        key: 'WeChatServerToken',
-        value: inputs.WeChatServerToken,
-      });
-    }
-
-    if (options.length > 0) {
-      await updateOptions(options);
-    }
-  };
-
-  const submitGitHubOAuth = async () => {
-    const options = [];
-
-    if (originInputs['GitHubClientId'] !== inputs.GitHubClientId) {
-      options.push({ key: 'GitHubClientId', value: inputs.GitHubClientId });
-    }
-    if (
-      originInputs['GitHubClientSecret'] !== inputs.GitHubClientSecret &&
-      inputs.GitHubClientSecret !== ''
-    ) {
-      options.push({
-        key: 'GitHubClientSecret',
-        value: inputs.GitHubClientSecret,
-      });
-    }
-
-    if (options.length > 0) {
-      await updateOptions(options);
-    }
-  };
-
-  const submitDiscordOAuth = async () => {
-    const options = [];
-
-    if (originInputs['discord.client_id'] !== inputs['discord.client_id']) {
-      options.push({
-        key: 'discord.client_id',
-        value: inputs['discord.client_id'],
-      });
-    }
-    if (
-      originInputs['discord.client_secret'] !==
-        inputs['discord.client_secret'] &&
-      inputs['discord.client_secret'] !== ''
-    ) {
-      options.push({
-        key: 'discord.client_secret',
-        value: inputs['discord.client_secret'],
-      });
-    }
-
-    if (options.length > 0) {
-      await updateOptions(options);
-    }
-  };
-
-  const submitOIDCSettings = async () => {
-    if (inputs['oidc.well_known'] && inputs['oidc.well_known'] !== '') {
-      if (
-        !inputs['oidc.well_known'].startsWith('http://') &&
-        !inputs['oidc.well_known'].startsWith('https://')
-      ) {
-        showError(t('Well-Known URL 必须以 http:// 或 https:// 开头'));
-        return;
-      }
-      try {
-        const res = await axios.create().get(inputs['oidc.well_known']);
-        inputs['oidc.authorization_endpoint'] =
-          res.data['authorization_endpoint'];
-        inputs['oidc.token_endpoint'] = res.data['token_endpoint'];
-        inputs['oidc.user_info_endpoint'] = res.data['userinfo_endpoint'];
-        showSuccess(t('获取 OIDC 配置成功！'));
-      } catch (err) {
-        console.error(err);
-        showError(
-          t('获取 OIDC 配置失败，请检查网络状况和 Well-Known URL 是否正确'),
-        );
-        return;
-      }
-    }
-
-    const options = [];
-
-    if (originInputs['oidc.well_known'] !== inputs['oidc.well_known']) {
-      options.push({
-        key: 'oidc.well_known',
-        value: inputs['oidc.well_known'],
-      });
-    }
-    if (originInputs['oidc.client_id'] !== inputs['oidc.client_id']) {
-      options.push({ key: 'oidc.client_id', value: inputs['oidc.client_id'] });
-    }
-    if (
-      originInputs['oidc.client_secret'] !== inputs['oidc.client_secret'] &&
-      inputs['oidc.client_secret'] !== ''
-    ) {
-      options.push({
-        key: 'oidc.client_secret',
-        value: inputs['oidc.client_secret'],
-      });
-    }
-    if (
-      originInputs['oidc.authorization_endpoint'] !==
-      inputs['oidc.authorization_endpoint']
-    ) {
-      options.push({
-        key: 'oidc.authorization_endpoint',
-        value: inputs['oidc.authorization_endpoint'],
-      });
-    }
-    if (originInputs['oidc.token_endpoint'] !== inputs['oidc.token_endpoint']) {
-      options.push({
-        key: 'oidc.token_endpoint',
-        value: inputs['oidc.token_endpoint'],
-      });
-    }
-    if (
-      originInputs['oidc.user_info_endpoint'] !==
-      inputs['oidc.user_info_endpoint']
-    ) {
-      options.push({
-        key: 'oidc.user_info_endpoint',
-        value: inputs['oidc.user_info_endpoint'],
-      });
-    }
-
-    if (options.length > 0) {
-      await updateOptions(options);
-    }
-  };
-
-  const submitTelegramSettings = async () => {
-    const options = [
-      { key: 'TelegramBotToken', value: inputs.TelegramBotToken },
-      { key: 'TelegramBotName', value: inputs.TelegramBotName },
-    ];
-    await updateOptions(options);
-  };
-
   const submitTurnstile = async () => {
     const options = [];
 
@@ -601,36 +406,6 @@ const SystemSetting = () => {
       options.push({
         key: 'TurnstileSecretKey',
         value: inputs.TurnstileSecretKey,
-      });
-    }
-
-    if (options.length > 0) {
-      await updateOptions(options);
-    }
-  };
-
-  const submitLinuxDOOAuth = async () => {
-    const options = [];
-
-    if (originInputs['LinuxDOClientId'] !== inputs.LinuxDOClientId) {
-      options.push({ key: 'LinuxDOClientId', value: inputs.LinuxDOClientId });
-    }
-    if (
-      originInputs['LinuxDOClientSecret'] !== inputs.LinuxDOClientSecret &&
-      inputs.LinuxDOClientSecret !== ''
-    ) {
-      options.push({
-        key: 'LinuxDOClientSecret',
-        value: inputs.LinuxDOClientSecret,
-      });
-    }
-    if (
-      originInputs['LinuxDOMinimumTrustLevel'] !==
-      inputs.LinuxDOMinimumTrustLevel
-    ) {
-      options.push({
-        key: 'LinuxDOMinimumTrustLevel',
-        value: inputs.LinuxDOMinimumTrustLevel,
       });
     }
 
@@ -685,9 +460,6 @@ const SystemSetting = () => {
       setShowPasswordLoginConfirmModal(true);
     } else {
       await updateOptions([{ key: optionKey, value }]);
-    }
-    if (optionKey === 'LinuxDOOAuthEnabled') {
-      setLinuxDOOAuthEnabled(value);
     }
   };
 
@@ -1036,62 +808,6 @@ const SystemSetting = () => {
                         {t('允许 Turnstile 用户校验')}
                       </Form.Checkbox>
                     </Col>
-                    <Col xs={24} sm={24} md={12} lg={12} xl={12}>
-                      <Form.Checkbox
-                        field='GitHubOAuthEnabled'
-                        noLabel
-                        onChange={(e) =>
-                          handleCheckboxChange('GitHubOAuthEnabled', e)
-                        }
-                      >
-                        {t('允许通过 GitHub 账户登录 & 注册')}
-                      </Form.Checkbox>
-                      <Form.Checkbox
-                        field='discord.enabled'
-                        noLabel
-                        onChange={(e) =>
-                          handleCheckboxChange('discord.enabled', e)
-                        }
-                      >
-                        {t('允许通过 Discord 账户登录 & 注册')}
-                      </Form.Checkbox>
-                      <Form.Checkbox
-                        field='LinuxDOOAuthEnabled'
-                        noLabel
-                        onChange={(e) =>
-                          handleCheckboxChange('LinuxDOOAuthEnabled', e)
-                        }
-                      >
-                        {t('允许通过 Linux DO 账户登录 & 注册')}
-                      </Form.Checkbox>
-                      <Form.Checkbox
-                        field='WeChatAuthEnabled'
-                        noLabel
-                        onChange={(e) =>
-                          handleCheckboxChange('WeChatAuthEnabled', e)
-                        }
-                      >
-                        {t('允许通过微信登录 & 注册')}
-                      </Form.Checkbox>
-                      <Form.Checkbox
-                        field='TelegramOAuthEnabled'
-                        noLabel
-                        onChange={(e) =>
-                          handleCheckboxChange('TelegramOAuthEnabled', e)
-                        }
-                      >
-                        {t('允许通过 Telegram 进行登录')}
-                      </Form.Checkbox>
-                      <Form.Checkbox
-                        field="['oidc.enabled']"
-                        noLabel
-                        onChange={(e) =>
-                          handleCheckboxChange('oidc.enabled', e)
-                        }
-                      >
-                        {t('允许通过 OIDC 进行登录')}
-                      </Form.Checkbox>
-                    </Col>
                   </Row>
                 </Form.Section>
               </Card>
@@ -1351,263 +1067,6 @@ const SystemSetting = () => {
                   <Button onClick={submitSMTP}>{t('保存 SMTP 设置')}</Button>
                 </Form.Section>
               </Card>
-              <Card>
-                <Form.Section text={t('配置 OIDC')}>
-                  <Text>
-                    {t(
-                      '用以支持通过 OIDC 登录，例如 Okta、Auth0 等兼容 OIDC 协议的 IdP',
-                    )}
-                  </Text>
-                  <Banner
-                    type='info'
-                    description={`${t('主页链接填')} ${inputs.ServerAddress ? inputs.ServerAddress : t('网站地址')}，${t('重定向 URL 填')} ${inputs.ServerAddress ? inputs.ServerAddress : t('网站地址')}/oauth/oidc`}
-                    style={{ marginBottom: 20, marginTop: 16 }}
-                  />
-                  <Text>
-                    {t(
-                      '若你的 OIDC Provider 支持 Discovery Endpoint，你可以仅填写 OIDC Well-Known URL，系统会自动获取 OIDC 配置',
-                    )}
-                  </Text>
-                  <Row
-                    gutter={{ xs: 8, sm: 16, md: 24, lg: 24, xl: 24, xxl: 24 }}
-                  >
-                    <Col xs={24} sm={24} md={12} lg={12} xl={12}>
-                      <Form.Input
-                        field="['oidc.well_known']"
-                        label={t('Well-Known URL')}
-                        placeholder={t('请输入 OIDC 的 Well-Known URL')}
-                      />
-                    </Col>
-                    <Col xs={24} sm={24} md={12} lg={12} xl={12}>
-                      <Form.Input
-                        field="['oidc.client_id']"
-                        label={t('Client ID')}
-                        placeholder={t('输入 OIDC 的 Client ID')}
-                      />
-                    </Col>
-                  </Row>
-                  <Row
-                    gutter={{ xs: 8, sm: 16, md: 24, lg: 24, xl: 24, xxl: 24 }}
-                  >
-                    <Col xs={24} sm={24} md={12} lg={12} xl={12}>
-                      <Form.Input
-                        field="['oidc.client_secret']"
-                        label={t('Client Secret')}
-                        type='password'
-                        placeholder={t('敏感信息不会发送到前端显示')}
-                      />
-                    </Col>
-                    <Col xs={24} sm={24} md={12} lg={12} xl={12}>
-                      <Form.Input
-                        field="['oidc.authorization_endpoint']"
-                        label={t('Authorization Endpoint')}
-                        placeholder={t('输入 OIDC 的 Authorization Endpoint')}
-                      />
-                    </Col>
-                  </Row>
-                  <Row
-                    gutter={{ xs: 8, sm: 16, md: 24, lg: 24, xl: 24, xxl: 24 }}
-                  >
-                    <Col xs={24} sm={24} md={12} lg={12} xl={12}>
-                      <Form.Input
-                        field="['oidc.token_endpoint']"
-                        label={t('Token Endpoint')}
-                        placeholder={t('输入 OIDC 的 Token Endpoint')}
-                      />
-                    </Col>
-                    <Col xs={24} sm={24} md={12} lg={12} xl={12}>
-                      <Form.Input
-                        field="['oidc.user_info_endpoint']"
-                        label={t('User Info Endpoint')}
-                        placeholder={t('输入 OIDC 的 Userinfo Endpoint')}
-                      />
-                    </Col>
-                  </Row>
-                  <Button onClick={submitOIDCSettings}>
-                    {t('保存 OIDC 设置')}
-                  </Button>
-                </Form.Section>
-              </Card>
-
-              <Card>
-                <Form.Section text={t('配置 GitHub OAuth App')}>
-                  <Text>{t('用以支持通过 GitHub 进行登录注册')}</Text>
-                  <Banner
-                    type='info'
-                    description={`${t('Homepage URL 填')} ${inputs.ServerAddress ? inputs.ServerAddress : t('网站地址')}，${t('Authorization callback URL 填')} ${inputs.ServerAddress ? inputs.ServerAddress : t('网站地址')}/oauth/github`}
-                    style={{ marginBottom: 20, marginTop: 16 }}
-                  />
-                  <Row
-                    gutter={{ xs: 8, sm: 16, md: 24, lg: 24, xl: 24, xxl: 24 }}
-                  >
-                    <Col xs={24} sm={24} md={12} lg={12} xl={12}>
-                      <Form.Input
-                        field='GitHubClientId'
-                        label={t('GitHub Client ID')}
-                      />
-                    </Col>
-                    <Col xs={24} sm={24} md={12} lg={12} xl={12}>
-                      <Form.Input
-                        field='GitHubClientSecret'
-                        label={t('GitHub Client Secret')}
-                        type='password'
-                        placeholder={t('敏感信息不会发送到前端显示')}
-                      />
-                    </Col>
-                  </Row>
-                  <Button onClick={submitGitHubOAuth}>
-                    {t('保存 GitHub OAuth 设置')}
-                  </Button>
-                </Form.Section>
-              </Card>
-              <Card>
-                <Form.Section text={t('配置 Discord OAuth')}>
-                  <Text>{t('用以支持通过 Discord 进行登录注册')}</Text>
-                  <Banner
-                    type='info'
-                    description={`${t('Homepage URL 填')} ${inputs.ServerAddress ? inputs.ServerAddress : t('网站地址')}，${t('Authorization callback URL 填')} ${inputs.ServerAddress ? inputs.ServerAddress : t('网站地址')}/oauth/discord`}
-                    style={{ marginBottom: 20, marginTop: 16 }}
-                  />
-                  <Row
-                    gutter={{ xs: 8, sm: 16, md: 24, lg: 24, xl: 24, xxl: 24 }}
-                  >
-                    <Col xs={24} sm={24} md={12} lg={12} xl={12}>
-                      <Form.Input
-                        field="['discord.client_id']"
-                        label={t('Discord Client ID')}
-                      />
-                    </Col>
-                    <Col xs={24} sm={24} md={12} lg={12} xl={12}>
-                      <Form.Input
-                        field="['discord.client_secret']"
-                        label={t('Discord Client Secret')}
-                        type='password'
-                        placeholder={t('敏感信息不会发送到前端显示')}
-                      />
-                    </Col>
-                  </Row>
-                  <Button onClick={submitDiscordOAuth}>
-                    {t('保存 Discord OAuth 设置')}
-                  </Button>
-                </Form.Section>
-              </Card>
-              <Card>
-                <Form.Section text={t('配置 Linux DO OAuth')}>
-                  <Text>
-                    {t('用以支持通过 Linux DO 进行登录注册')}
-                    <a
-                      href='https://connect.linux.do/'
-                      target='_blank'
-                      rel='noreferrer'
-                      style={{
-                        display: 'inline-block',
-                        marginLeft: 4,
-                        marginRight: 4,
-                      }}
-                    >
-                      {t('点击此处')}
-                    </a>
-                    {t('管理你的 LinuxDO OAuth App')}
-                  </Text>
-                  <Banner
-                    type='info'
-                    description={`${t('回调 URL 填')} ${inputs.ServerAddress ? inputs.ServerAddress : t('网站地址')}/oauth/linuxdo`}
-                    style={{ marginBottom: 20, marginTop: 16 }}
-                  />
-                  <Row
-                    gutter={{ xs: 8, sm: 16, md: 24, lg: 24, xl: 24, xxl: 24 }}
-                  >
-                    <Col xs={24} sm={24} md={10} lg={10} xl={10}>
-                      <Form.Input
-                        field='LinuxDOClientId'
-                        label={t('Linux DO Client ID')}
-                        placeholder={t('输入你注册的 LinuxDO OAuth APP 的 ID')}
-                      />
-                    </Col>
-                    <Col xs={24} sm={24} md={10} lg={10} xl={10}>
-                      <Form.Input
-                        field='LinuxDOClientSecret'
-                        label={t('Linux DO Client Secret')}
-                        type='password'
-                        placeholder={t('敏感信息不会发送到前端显示')}
-                      />
-                    </Col>
-                    <Col xs={24} sm={24} md={4} lg={4} xl={4}>
-                      <Form.Input
-                        field='LinuxDOMinimumTrustLevel'
-                        label='LinuxDO Minimum Trust Level'
-                        placeholder='允许注册的最低信任等级'
-                      />
-                    </Col>
-                  </Row>
-                  <Button onClick={submitLinuxDOOAuth}>
-                    {t('保存 Linux DO OAuth 设置')}
-                  </Button>
-                </Form.Section>
-              </Card>
-
-              <CustomOAuthSetting serverAddress={inputs.ServerAddress} />
-
-              <Card>
-                <Form.Section text={t('配置 WeChat Server')}>
-                  <Text>{t('用以支持通过微信进行登录注册')}</Text>
-                  <Row
-                    gutter={{ xs: 8, sm: 16, md: 24, lg: 24, xl: 24, xxl: 24 }}
-                  >
-                    <Col xs={24} sm={24} md={8} lg={8} xl={8}>
-                      <Form.Input
-                        field='WeChatServerAddress'
-                        label={t('WeChat Server 服务器地址')}
-                      />
-                    </Col>
-                    <Col xs={24} sm={24} md={8} lg={8} xl={8}>
-                      <Form.Input
-                        field='WeChatServerToken'
-                        label={t('WeChat Server 访问凭证')}
-                        type='password'
-                        placeholder={t('敏感信息不会发送到前端显示')}
-                      />
-                    </Col>
-                    <Col xs={24} sm={24} md={8} lg={8} xl={8}>
-                      <Form.Input
-                        field='WeChatAccountQRCodeImageURL'
-                        label={t('微信公众号二维码图片链接')}
-                      />
-                    </Col>
-                  </Row>
-                  <Button onClick={submitWeChat}>
-                    {t('保存 WeChat Server 设置')}
-                  </Button>
-                </Form.Section>
-              </Card>
-
-              <Card>
-                <Form.Section text={t('配置 Telegram 登录')}>
-                  <Text>{t('用以支持通过 Telegram 进行登录注册')}</Text>
-                  <Row
-                    gutter={{ xs: 8, sm: 16, md: 24, lg: 24, xl: 24, xxl: 24 }}
-                  >
-                    <Col xs={24} sm={24} md={12} lg={12} xl={12}>
-                      <Form.Input
-                        field='TelegramBotToken'
-                        label={t('Telegram Bot Token')}
-                        placeholder={t('敏感信息不会发送到前端显示')}
-                        type='password'
-                      />
-                    </Col>
-                    <Col xs={24} sm={24} md={12} lg={12} xl={12}>
-                      <Form.Input
-                        field='TelegramBotName'
-                        label={t('Telegram Bot 名称')}
-                      />
-                    </Col>
-                  </Row>
-                  <Button onClick={submitTelegramSettings}>
-                    {t('保存 Telegram 登录设置')}
-                  </Button>
-                </Form.Section>
-              </Card>
-
               <Card>
                 <Form.Section text={t('配置 Turnstile')}>
                   <Text>{t('用以支持用户校验')}</Text>

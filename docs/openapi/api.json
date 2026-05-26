@@ -13,9 +13,6 @@
       "name": "用户登陆注册"
     },
     {
-      "name": "OAuth"
-    },
-    {
       "name": "用户管理"
     },
     {
@@ -746,279 +743,32 @@
         ]
       }
     },
-    "/api/oauth/github": {
-      "get": {
-        "summary": "GitHub OAuth登录",
-        "deprecated": false,
-        "description": "🔓 无需鉴权（OAuth回调）",
-        "tags": [
-          "OAuth"
-        ],
-        "parameters": [
-          {
-            "name": "code",
-            "in": "query",
-            "description": "",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "成功",
-            "headers": {}
-          }
-        },
-        "security": [
-          {
-            "Combination343": []
-          },
-          {
-            "Combination1243": []
-          }
-        ]
-      }
-    },
-    "/api/oauth/discord": {
-      "get": {
-        "summary": "Discord OAuth登录",
-        "deprecated": false,
-        "description": "🔓 无需鉴权（OAuth回调）",
-        "tags": [
-          "OAuth"
-        ],
-        "parameters": [
-          {
-            "name": "code",
-            "in": "query",
-            "description": "",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "成功",
-            "headers": {}
-          }
-        },
-        "security": [
-          {
-            "Combination343": []
-          },
-          {
-            "Combination1243": []
-          }
-        ]
-      }
-    },
-    "/api/oauth/oidc": {
-      "get": {
-        "summary": "OIDC登录",
-        "deprecated": false,
-        "description": "🔓 无需鉴权（OAuth回调）",
-        "tags": [
-          "OAuth"
-        ],
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "成功",
-            "headers": {}
-          }
-        },
-        "security": [
-          {
-            "Combination343": []
-          },
-          {
-            "Combination1243": []
-          }
-        ]
-      }
-    },
-    "/api/oauth/linuxdo": {
-      "get": {
-        "summary": "LinuxDO OAuth登录",
-        "deprecated": false,
-        "description": "🔓 无需鉴权（OAuth回调）",
-        "tags": [
-          "OAuth"
-        ],
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "成功",
-            "headers": {}
-          }
-        },
-        "security": [
-          {
-            "Combination343": []
-          },
-          {
-            "Combination1243": []
-          }
-        ]
-      }
-    },
-    "/api/oauth/state": {
-      "get": {
-        "summary": "生成OAuth State",
-        "deprecated": false,
-        "description": "🔓 无需鉴权",
-        "tags": [
-          "OAuth"
-        ],
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "成功",
-            "headers": {}
-          }
-        },
-        "security": [
-          {
-            "Combination343": []
-          },
-          {
-            "Combination1243": []
-          }
-        ]
-      }
-    },
-    "/api/oauth/wechat": {
-      "get": {
-        "summary": "微信OAuth登录",
-        "deprecated": false,
-        "description": "🔓 无需鉴权（OAuth回调）",
-        "tags": [
-          "OAuth"
-        ],
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "成功",
-            "headers": {}
-          }
-        },
-        "security": [
-          {
-            "Combination343": []
-          },
-          {
-            "Combination1243": []
-          }
-        ]
-      }
-    },
-    "/api/oauth/wechat/bind": {
-      "get": {
-        "summary": "绑定微信",
-        "deprecated": false,
-        "description": "🔓 无需鉴权",
-        "tags": [
-          "OAuth"
-        ],
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "成功",
-            "headers": {}
-          }
-        },
-        "security": [
-          {
-            "Combination343": []
-          },
-          {
-            "Combination1243": []
-          }
-        ]
-      }
-    },
     "/api/oauth/email/bind": {
-      "get": {
+      "post": {
         "summary": "绑定邮箱",
         "deprecated": false,
-        "description": "🔓 无需鉴权",
+        "description": "🔐 需要登录（User权限）",
         "tags": [
-          "OAuth"
+          "用户管理"
         ],
-        "parameters": [
-          {
-            "name": "email",
-            "in": "query",
-            "description": "",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "code",
-            "in": "query",
-            "description": "",
-            "required": false,
-            "schema": {
-              "type": "string"
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string"
+                  },
+                  "code": {
+                    "type": "string"
+                  }
+                }
+              }
             }
           }
-        ],
-        "responses": {
-          "200": {
-            "description": "成功",
-            "headers": {}
-          }
         },
-        "security": [
-          {
-            "Combination343": []
-          },
-          {
-            "Combination1243": []
-          }
-        ]
-      }
-    },
-    "/api/oauth/telegram/login": {
-      "get": {
-        "summary": "Telegram登录",
-        "deprecated": false,
-        "description": "🔓 无需鉴权（OAuth回调）",
-        "tags": [
-          "OAuth"
-        ],
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "成功",
-            "headers": {}
-          }
-        },
-        "security": [
-          {
-            "Combination343": []
-          },
-          {
-            "Combination1243": []
-          }
-        ]
-      }
-    },
-    "/api/oauth/telegram/bind": {
-      "get": {
-        "summary": "绑定Telegram",
-        "deprecated": false,
-        "description": "🔓 无需鉴权",
-        "tags": [
-          "OAuth"
-        ],
-        "parameters": [],
         "responses": {
           "200": {
             "description": "成功",

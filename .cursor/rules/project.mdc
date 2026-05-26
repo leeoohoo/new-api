@@ -15,8 +15,10 @@ This is an AI API gateway/proxy built with Go. It aggregates 40+ upstream AI pro
 - **Frontend**: React 18, Vite, Semi Design UI (@douyinfe/semi-ui)
 - **Databases**: SQLite, MySQL, PostgreSQL (all three must be supported)
 - **Cache**: Redis (go-redis) + in-memory cache
-- **Auth**: JWT, WebAuthn/Passkeys, OAuth (GitHub, Discord, OIDC, etc.)
+- **Auth**: Session-based local auth, WebAuthn/Passkeys, 2FA, email verification/bind, Codex OAuth credential flow
 - **Frontend package manager**: Bun (preferred over npm/yarn/pnpm)
+
+Note: historical external user OAuth/SSO integrations (GitHub, Discord, OIDC, LinuxDO, WeChat, Telegram, etc.) are not present in the current branch.
 
 ## Architecture
 
@@ -36,7 +38,6 @@ dto/           — Data transfer objects (request/response structs)
 constant/      — Constants (API types, channel types, context keys)
 types/         — Type definitions (relay formats, file sources, errors)
 i18n/          — Backend internationalization (go-i18n, en/zh)
-oauth/         — OAuth provider implementations
 pkg/           — Internal packages (cachex, ionet)
 web/           — React frontend
   web/src/i18n/  — Frontend internationalization (i18next, zh/en/fr/ru/ja/vi)

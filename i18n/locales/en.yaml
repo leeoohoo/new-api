@@ -266,12 +266,3 @@ distributor.get_channel_failed: "Failed to get available channel for model {{.Mo
 distributor.no_available_channel: "No available channel for model {{.Model}} under group {{.Group}} (distributor)"
 distributor.invalid_midjourney_request: "Invalid Midjourney request: {{.Error}}"
 distributor.invalid_request_parse_model: "Invalid request, unable to parse model"
-
-# Custom OAuth provider messages
-custom_oauth.not_found: "Custom OAuth provider not found"
-custom_oauth.slug_empty: "Slug cannot be empty"
-custom_oauth.slug_exists: "Slug already exists"
-custom_oauth.name_empty: "Provider name cannot be empty"
-custom_oauth.has_bindings: "Cannot delete provider with existing user bindings"
-custom_oauth.binding_not_found: "OAuth binding not found"
-custom_oauth.provider_id_field_invalid: "Could not extract user ID from provider response"

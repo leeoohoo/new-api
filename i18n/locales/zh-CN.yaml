@@ -267,12 +267,3 @@ distributor.get_channel_failed: "获取分组 {{.Group}} 下模型 {{.Model}} �
 distributor.no_available_channel: "分组 {{.Group}} 下模型 {{.Model}} 无可用渠道（distributor）"
 distributor.invalid_midjourney_request: "无效的midjourney请求，{{.Error}}"
 distributor.invalid_request_parse_model: "无效的请求，无法解析模型"
-
-# Custom OAuth provider messages
-custom_oauth.not_found: "自定义 OAuth 提供商不存在"
-custom_oauth.slug_empty: "标识符不能为空"
-custom_oauth.slug_exists: "标识符已存在"
-custom_oauth.name_empty: "提供商名称不能为空"
-custom_oauth.has_bindings: "无法删除已有用户绑定的提供商"
-custom_oauth.binding_not_found: "OAuth 绑定不存在"
-custom_oauth.provider_id_field_invalid: "无法从提供商响应中提取用户 ID"

@@ -52,11 +52,9 @@ import {
   IconUser,
   IconSave,
   IconClose,
-  IconLink,
   IconUserGroup,
   IconEdit,
 } from '@douyinfe/semi-icons';
-import UserBindingManagementModal from './UserBindingManagementModal';
 
 const { Text, Title } = Typography;
 
@@ -71,7 +69,6 @@ const EditUserModal = (props) => {
   const [adjustLoading, setAdjustLoading] = useState(false);
   const isMobile = useIsMobile();
   const [groupOptions, setGroupOptions] = useState([]);
-  const [bindingModalVisible, setBindingModalVisible] = useState(false);
   const formApiRef = useRef(null);
   const [showAdjustQuotaRaw, setShowAdjustQuotaRaw] = useState(false);
   const [showQuotaInput, setShowQuotaInput] = useState(false);
@@ -83,12 +80,6 @@ const EditUserModal = (props) => {
     username: '',
     display_name: '',
     password: '',
-    github_id: '',
-    oidc_id: '',
-    discord_id: '',
-    wechat_id: '',
-    telegram_id: '',
-    linux_do_id: '',
     email: '',
     quota: 0,
     quota_amount: 0,
@@ -147,16 +138,7 @@ const EditUserModal = (props) => {
   useEffect(() => {
     loadUser();
     if (userId) fetchGroups();
-    setBindingModalVisible(false);
   }, [props.editingUser.id]);
-
-  const openBindingModal = () => {
-    setBindingModalVisible(true);
-  };
-
-  const closeBindingModal = () => {
-    setBindingModalVisible(false);
-  };
 
   /* ----------------------- submit ----------------------- */
   const submit = async (values) => {
@@ -436,51 +418,11 @@ const EditUserModal = (props) => {
                     </Row>
                   </Card>
                 )}
-
-                {/* 绑定信息入口 */}
-                {userId && (
-                  <Card className='!rounded-2xl shadow-sm border-0'>
-                    <div className='flex items-center justify-between gap-3'>
-                      <div className='flex items-center min-w-0'>
-                        <Avatar
-                          size='small'
-                          color='purple'
-                          className='mr-2 shadow-md'
-                        >
-                          <IconLink size={16} />
-                        </Avatar>
-                        <div className='min-w-0'>
-                          <Text className='text-lg font-medium'>
-                            {t('绑定信息')}
-                          </Text>
-                          <div className='text-xs text-gray-600'>
-                            {t('管理用户已绑定的第三方账户，支持筛选与解绑')}
-                          </div>
-                        </div>
-                      </div>
-                      <Button
-                        type='primary'
-                        theme='outline'
-                        onClick={openBindingModal}
-                      >
-                        {t('管理绑定')}
-                      </Button>
-                    </div>
-                  </Card>
-                )}
               </div>
             )}
           </Form>
         </Spin>
       </SideSheet>
-
-      <UserBindingManagementModal
-        visible={bindingModalVisible}
-        onCancel={closeBindingModal}
-        userId={userId}
-        isMobile={isMobile}
-        formApiRef={formApiRef}
-      />
 
       {/* 调整额度模态框 */}
       <Modal

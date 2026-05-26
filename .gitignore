@@ -35,3 +35,4 @@ token_estimator_test.go
 deploy_run.log
 /.chatos
 /.tmp
+/docs/agent_chat/
