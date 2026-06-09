@@ -17,9 +17,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React from 'react';
-import { Navigate } from 'react-router-dom';
-import { history } from './history';
+import React, { useEffect } from 'react';
+import { Navigate, useLocation } from 'react-router-dom';
+import { UserContext } from '../context/User';
+import Loading from '../components/common/ui/Loading';
+import { redirectToIAMLogin } from './utils';
 
 export function authHeader() {
   // return authorization header with jwt token
@@ -33,35 +35,62 @@ export function authHeader() {
 }
 
 export const AuthRedirect = ({ children }) => {
-  const user = localStorage.getItem('user');
+  const [userState] = React.useContext(UserContext);
 
-  if (user) {
+  if (!userState?.authChecked) {
+    return <Loading />;
+  }
+
+  if (userState?.user) {
     return <Navigate to='/console' replace />;
   }
 
   return children;
 };
 
+const IAMLoginRedirect = () => {
+  const location = useLocation();
+
+  useEffect(() => {
+    const next = `${location.pathname}${location.search}${location.hash}`;
+    redirectToIAMLogin(next, true);
+  }, [location]);
+
+  return <Loading />;
+};
+
 function PrivateRoute({ children }) {
-  if (!localStorage.getItem('user')) {
-    return <Navigate to='/login' state={{ from: history.location }} />;
+  const [userState] = React.useContext(UserContext);
+
+  if (!userState?.authChecked) {
+    return <Loading />;
+  }
+
+  if (!userState?.user) {
+    return <IAMLoginRedirect />;
   }
   return children;
 }
 
 export function AdminRoute({ children }) {
-  const raw = localStorage.getItem('user');
-  if (!raw) {
-    return <Navigate to='/login' state={{ from: history.location }} />;
+  const [userState] = React.useContext(UserContext);
+
+  if (!userState?.authChecked) {
+    return <Loading />;
   }
-  try {
-    const user = JSON.parse(raw);
-    if (user && typeof user.role === 'number' && user.role >= 10) {
-      return children;
-    }
-  } catch (e) {
-    // ignore
+
+  if (!userState?.user) {
+    return <IAMLoginRedirect />;
   }
+
+  if (
+    userState.user &&
+    typeof userState.user.role === 'number' &&
+    userState.user.role >= 10
+  ) {
+    return children;
+  }
+
   return <Navigate to='/forbidden' replace />;
 }
 

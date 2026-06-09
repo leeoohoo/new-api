@@ -89,15 +89,60 @@ func Login(c *gin.Context) {
 	setupLogin(&user, c)
 }
 
-// setup session & cookies and then return user info
-func setupLogin(user *model.User, c *gin.Context) {
-	session := sessions.Default(c)
+func populateLoginSession(session sessions.Session, user *model.User) {
 	session.Set("id", user.Id)
 	session.Set("username", user.Username)
 	session.Set("role", user.Role)
 	session.Set("status", user.Status)
 	session.Set("group", user.Group)
-	err := session.Save()
+	session.Set("login_at", common.GetTimestamp())
+}
+
+func saveLoginSession(user *model.User, c *gin.Context) error {
+	session := sessions.Default(c)
+	populateLoginSession(session, user)
+	return session.Save()
+}
+
+func clearLoginSession(c *gin.Context) error {
+	session := sessions.Default(c)
+	session.Clear()
+	return session.Save()
+}
+
+func buildUserSelfResponseData(user *model.User, userRole int) map[string]interface{} {
+	// Hide admin remarks: set to empty to trigger omitempty tag, ensuring the remark field is not included in JSON returned to regular users
+	user.Remark = ""
+
+	permissions := calculateUserPermissions(userRole)
+	userSetting := user.GetSetting()
+
+	return map[string]interface{}{
+		"id":                user.Id,
+		"username":          user.Username,
+		"display_name":      user.DisplayName,
+		"role":              user.Role,
+		"status":            user.Status,
+		"email":             user.Email,
+		"group":             user.Group,
+		"quota":             user.Quota,
+		"used_quota":        user.UsedQuota,
+		"request_count":     user.RequestCount,
+		"aff_code":          user.AffCode,
+		"aff_count":         user.AffCount,
+		"aff_quota":         user.AffQuota,
+		"aff_history_quota": user.AffHistoryQuota,
+		"inviter_id":        user.InviterId,
+		"setting":           user.Setting,
+		"stripe_customer":   user.StripeCustomer,
+		"sidebar_modules":   userSetting.SidebarModules,
+		"permissions":       permissions,
+	}
+}
+
+// setup session & cookies and then return user info
+func setupLogin(user *model.User, c *gin.Context) {
+	err := saveLoginSession(user, c)
 	if err != nil {
 		common.ApiErrorI18n(c, i18n.MsgUserSessionSaveFailed)
 		return
@@ -117,9 +162,7 @@ func setupLogin(user *model.User, c *gin.Context) {
 }
 
 func Logout(c *gin.Context) {
-	session := sessions.Default(c)
-	session.Clear()
-	err := session.Save()
+	err := clearLoginSession(c)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"message": err.Error(),
@@ -378,37 +421,7 @@ func GetSelf(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	// Hide admin remarks: set to empty to trigger omitempty tag, ensuring the remark field is not included in JSON returned to regular users
-	user.Remark = ""
-
-	// 计算用户权限信息
-	permissions := calculateUserPermissions(userRole)
-
-	// 获取用户设置并提取sidebar_modules
-	userSetting := user.GetSetting()
-
-	// 构建响应数据，包含用户信息和权限
-	responseData := map[string]interface{}{
-		"id":                user.Id,
-		"username":          user.Username,
-		"display_name":      user.DisplayName,
-		"role":              user.Role,
-		"status":            user.Status,
-		"email":             user.Email,
-		"group":             user.Group,
-		"quota":             user.Quota,
-		"used_quota":        user.UsedQuota,
-		"request_count":     user.RequestCount,
-		"aff_code":          user.AffCode,
-		"aff_count":         user.AffCount,
-		"aff_quota":         user.AffQuota,
-		"aff_history_quota": user.AffHistoryQuota,
-		"inviter_id":        user.InviterId,
-		"setting":           user.Setting,
-		"stripe_customer":   user.StripeCustomer,
-		"sidebar_modules":   userSetting.SidebarModules, // 正确提取sidebar_modules字段
-		"permissions":       permissions,                // 新增权限字段
-	}
+	responseData := buildUserSelfResponseData(user, userRole)
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,

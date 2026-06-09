@@ -18,7 +18,6 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useContext, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import {
   API,
   copy,
@@ -30,6 +29,8 @@ import {
   buildRegistrationResult,
   isPasskeySupported,
   setUserData,
+  clearUserData,
+  redirectToIAMLogout,
 } from '../../helpers';
 import { UserContext } from '../../context/User';
 import { Modal } from '@douyinfe/semi-ui';
@@ -47,7 +48,6 @@ import ChangePasswordModal from './personal/modals/ChangePasswordModal';
 
 const PersonalSetting = () => {
   const [userState, userDispatch] = useContext(UserContext);
-  let navigate = useNavigate();
   const { t } = useTranslation();
 
   const [inputs, setInputs] = useState({
@@ -292,10 +292,8 @@ const PersonalSetting = () => {
 
     if (success) {
       showSuccess(t('账户已删除！'));
-      await API.get('/api/user/logout');
-      userDispatch({ type: 'logout' });
-      localStorage.removeItem('user');
-      navigate('/login');
+      clearUserData();
+      redirectToIAMLogout('/', true);
     } else {
       showError(message);
     }

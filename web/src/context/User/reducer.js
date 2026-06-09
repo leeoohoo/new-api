@@ -22,12 +22,19 @@ export const reducer = (state, action) => {
     case 'login':
       return {
         ...state,
+        authChecked: true,
         user: action.payload,
       };
     case 'logout':
       return {
         ...state,
+        authChecked: true,
         user: undefined,
+      };
+    case 'setAuthChecked':
+      return {
+        ...state,
+        authChecked: action.payload,
       };
 
     default:
@@ -36,5 +43,6 @@ export const reducer = (state, action) => {
 };
 
 export const initialState = {
+  authChecked: false,
   user: undefined,
 };

@@ -26,6 +26,7 @@ import {
   showInfo,
   showSuccess,
   getSystemName,
+  buildIAMLoginURL,
 } from '../../helpers';
 import Turnstile from 'react-turnstile';
 import { Button, Card, Checkbox, Form } from '@douyinfe/semi-ui';
@@ -145,8 +146,8 @@ const RegisterForm = () => {
       );
       const { success, message } = res.data;
       if (success) {
-        navigate('/login');
         showSuccess('注册成功！');
+        window.location.href = buildIAMLoginURL('/');
       } else {
         showError(message);
       }
@@ -329,12 +330,12 @@ const RegisterForm = () => {
                 <div className='mt-6 text-center text-sm'>
                   <Text>
                     {t('已有账户？')}{' '}
-                    <Link
-                      to='/login'
+                    <a
+                      href={buildIAMLoginURL(window.location.href)}
                       className='text-blue-600 hover:text-blue-800 font-medium'
                     >
                       {t('登录')}
-                    </Link>
+                    </a>
                   </Text>
                 </div>
               </div>

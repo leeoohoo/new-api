@@ -21,6 +21,7 @@ import { Toast, Pagination } from '@douyinfe/semi-ui';
 import { toastConstants } from '../constants';
 import React from 'react';
 import { toast } from 'react-toastify';
+import { clearUserData, isLogoutInProgress, markLogoutInProgress } from './data';
 import {
   THINK_TAG_REGEX,
   MESSAGE_ROLES,
@@ -67,6 +68,64 @@ export function getUserIdFromLocalStorage() {
 
 export function getFooterHTML() {
   return localStorage.getItem('footer_html');
+}
+
+function getCurrentAbsoluteUrl() {
+  if (typeof window === 'undefined') {
+    return '/';
+  }
+  return window.location.href;
+}
+
+function normalizeIAMRedirectTarget(target) {
+  if (typeof target !== 'string') {
+    return getCurrentAbsoluteUrl();
+  }
+  const trimmed = target.trim();
+  if (!trimmed) {
+    return getCurrentAbsoluteUrl();
+  }
+  return trimmed;
+}
+
+export function buildIAMLoginURL(next = getCurrentAbsoluteUrl()) {
+  return `/auth/login?next=${encodeURIComponent(
+    normalizeIAMRedirectTarget(next),
+  )}`;
+}
+
+export function buildIAMLogoutURL(returnTo = getCurrentAbsoluteUrl()) {
+  return `/auth/logout?returnTo=${encodeURIComponent(
+    normalizeIAMRedirectTarget(returnTo),
+  )}`;
+}
+
+export function redirectToIAMLogin(next = getCurrentAbsoluteUrl(), replace = false) {
+  const loginURL = buildIAMLoginURL(next);
+  if (typeof window !== 'undefined') {
+    if (replace) {
+      window.location.replace(loginURL);
+    } else {
+      window.location.href = loginURL;
+    }
+  }
+  return loginURL;
+}
+
+export function redirectToIAMLogout(
+  returnTo = getCurrentAbsoluteUrl(),
+  replace = false,
+) {
+  const logoutURL = buildIAMLogoutURL(returnTo);
+  if (typeof window !== 'undefined') {
+    markLogoutInProgress();
+    if (replace) {
+      window.location.replace(logoutURL);
+    } else {
+      window.location.href = logoutURL;
+    }
+  }
+  return logoutURL;
 }
 
 export async function copy(text) {
@@ -125,10 +184,10 @@ export function showError(error) {
     if (error.name === 'AxiosError') {
       switch (error.response.status) {
         case 401:
-          // 清除用户状态
-          localStorage.removeItem('user');
-          // toast.error('错误：未登录或登录已过期，请重新登录！', showErrorOptions);
-          window.location.href = '/login?expired=true';
+          clearUserData();
+          if (!isLogoutInProgress()) {
+            redirectToIAMLogin(getCurrentAbsoluteUrl(), true);
+          }
           break;
         case 429:
           Toast.error('错误：请求次数过多，请稍后再试！');

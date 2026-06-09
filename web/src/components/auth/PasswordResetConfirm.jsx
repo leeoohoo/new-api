@@ -25,8 +25,9 @@ import {
   showNotice,
   getLogo,
   getSystemName,
+  buildIAMLoginURL,
 } from '../../helpers';
-import { useSearchParams, Link } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { Button, Card, Form, Typography, Banner } from '@douyinfe/semi-ui';
 import { IconMail, IconLock, IconCopy } from '@douyinfe/semi-icons';
 import { useTranslation } from 'react-i18next';
@@ -200,12 +201,12 @@ const PasswordResetConfirm = () => {
 
                 <div className='mt-6 text-center text-sm'>
                   <Text>
-                    <Link
-                      to='/login'
+                    <a
+                      href={buildIAMLoginURL('/')}
                       className='text-blue-600 hover:text-blue-800 font-medium'
                     >
                       {t('返回登录')}
-                    </Link>
+                    </a>
                   </Text>
                 </div>
               </div>

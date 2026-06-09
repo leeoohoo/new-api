@@ -25,11 +25,11 @@ import {
   showInfo,
   showSuccess,
   getSystemName,
+  buildIAMLoginURL,
 } from '../../helpers';
 import Turnstile from 'react-turnstile';
 import { Button, Card, Form, Typography } from '@douyinfe/semi-ui';
 import { IconMail } from '@douyinfe/semi-icons';
-import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
 const { Text, Title } = Typography;
@@ -162,12 +162,12 @@ const PasswordResetForm = () => {
                 <div className='mt-6 text-center text-sm'>
                   <Text>
                     {t('想起来了？')}{' '}
-                    <Link
-                      to='/login'
+                    <a
+                      href={buildIAMLoginURL('/')}
                       className='text-blue-600 hover:text-blue-800 font-medium'
                     >
                       {t('登录')}
-                    </Link>
+                    </a>
                   </Text>
                 </div>
               </div>

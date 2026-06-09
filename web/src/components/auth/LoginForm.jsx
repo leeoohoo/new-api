@@ -30,6 +30,7 @@ import {
   updateAPI,
   getSystemName,
   setUserData,
+  buildIAMLoginURL,
   prepareCredentialRequestOptions,
   buildAssertionResult,
   isPasskeySupported,
@@ -241,6 +242,8 @@ const LoginForm = () => {
   };
 
   const renderLoginForm = () => {
+    const iamLoginTarget = searchParams.get('next') || window.location.href;
+
     return (
       <div className='flex flex-col items-center'>
         <div className='w-full max-w-md'>
@@ -256,6 +259,21 @@ const LoginForm = () => {
               </Title>
             </div>
             <div className='px-2 py-8'>
+              <Button
+                theme='solid'
+                type='primary'
+                className='w-full !rounded-full mb-4'
+                onClick={() => {
+                  window.location.href = buildIAMLoginURL(iamLoginTarget);
+                }}
+              >
+                {t('使用公司账号登录')}
+              </Button>
+
+              <div className='text-center text-xs text-gray-500 mb-4'>
+                {t('推荐通过 IAM 统一身份认证登录')}
+              </div>
+
               {status.passkey_login && passkeySupported && (
                 <Button
                   theme='outline'

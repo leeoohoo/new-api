@@ -21,6 +21,8 @@ import React, { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { reducer, initialState } from './reducer';
 import { normalizeLanguage } from '../../i18n/language';
+import { API, updateAPI } from '../../helpers/api';
+import { clearUserData, setUserData } from '../../helpers/data';
 
 export const UserContext = React.createContext({
   state: initialState,
@@ -30,6 +32,43 @@ export const UserContext = React.createContext({
 export const UserProvider = ({ children }) => {
   const [state, dispatch] = React.useReducer(reducer, initialState);
   const { i18n } = useTranslation();
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const restoreAuth = async () => {
+      try {
+        const res = await API.get('/api/auth/me', {
+          disableDuplicate: true,
+          skipErrorHandler: true,
+          withCredentials: true,
+        });
+        const data = res?.data || {};
+        const localUser = data?.localUser;
+
+        if (!cancelled && data?.loggedIn && localUser?.id) {
+          setUserData(localUser);
+          updateAPI();
+          dispatch({ type: 'login', payload: localUser });
+          return;
+        }
+      } catch (e) {
+        // Ignore startup auth restore errors and fall back to logged-out state.
+      }
+
+      if (!cancelled) {
+        clearUserData();
+        updateAPI();
+        dispatch({ type: 'logout' });
+      }
+    };
+
+    restoreAuth();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Sync language preference when user data is loaded
   useEffect(() => {

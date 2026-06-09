@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React from 'react';
 import { Link } from 'react-router-dom';
+import { buildIAMLoginURL } from '../../../helpers';
 import SkeletonWrapper from '../components/SkeletonWrapper';
 
 const Navigation = ({
@@ -54,11 +55,20 @@ const Navigation = ({
       }
 
       let targetPath = link.to;
-      if (link.itemKey === 'console' && !userState.user) {
-        targetPath = '/login';
-      }
-      if (link.itemKey === 'pricing' && pricingRequireAuth && !userState.user) {
-        targetPath = '/login';
+      const requiresAuthRedirect =
+        (!userState.user && link.itemKey === 'console') ||
+        (!userState.user && link.itemKey === 'pricing' && pricingRequireAuth);
+
+      if (requiresAuthRedirect) {
+        return (
+          <a
+            key={link.itemKey}
+            href={buildIAMLoginURL(targetPath)}
+            className={commonLinkClasses}
+          >
+            {linkContent}
+          </a>
+        );
       }
 
       return (

@@ -57,5 +57,22 @@ export function setStatusData(data) {
 }
 
 export function setUserData(data) {
+  sessionStorage.removeItem('iam_logout_in_progress');
   localStorage.setItem('user', JSON.stringify(data));
+}
+
+export function clearUserData() {
+  localStorage.removeItem('user');
+}
+
+export function markLogoutInProgress() {
+  sessionStorage.setItem('iam_logout_in_progress', '1');
+}
+
+export function clearLogoutInProgress() {
+  sessionStorage.removeItem('iam_logout_in_progress');
+}
+
+export function isLogoutInProgress() {
+  return sessionStorage.getItem('iam_logout_in_progress') === '1';
 }

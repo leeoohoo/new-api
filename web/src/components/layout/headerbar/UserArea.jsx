@@ -27,7 +27,7 @@ import {
   IconCreditCard,
   IconKey,
 } from '@douyinfe/semi-icons';
-import { stringToColor } from '../../../helpers';
+import { buildIAMLoginURL, stringToColor } from '../../../helpers';
 import SkeletonWrapper from '../components/SkeletonWrapper';
 
 const UserArea = ({
@@ -170,15 +170,16 @@ const UserArea = ({
 
     return (
       <div className='flex items-center'>
-        <Link to='/login' className='flex'>
-          <Button
-            theme='borderless'
-            type='tertiary'
-            className={loginButtonClasses}
-          >
-            <span className={loginButtonTextSpanClass}>{t('登录')}</span>
-          </Button>
-        </Link>
+        <Button
+          theme='borderless'
+          type='tertiary'
+          className={loginButtonClasses}
+          onClick={() => {
+            window.location.href = buildIAMLoginURL(window.location.href);
+          }}
+        >
+          <span className={loginButtonTextSpanClass}>{t('登录')}</span>
+        </Button>
         {showRegisterButton && (
           <div className='hidden md:block'>
             <Link to='/register' className='flex -ml-px'>

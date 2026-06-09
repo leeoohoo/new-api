@@ -78,14 +78,6 @@ const PageLayout = () => {
     }
   }, [isMobile, drawerOpen, collapsed, setCollapsed]);
 
-  const loadUser = () => {
-    let user = localStorage.getItem('user');
-    if (user) {
-      let data = JSON.parse(user);
-      userDispatch({ type: 'login', payload: data });
-    }
-  };
-
   const loadStatus = async () => {
     try {
       const res = await API.get('/api/status');
@@ -102,7 +94,6 @@ const PageLayout = () => {
   };
 
   useEffect(() => {
-    loadUser();
     loadStatus().catch(console.error);
     let systemName = getSystemName();
     if (systemName) {
