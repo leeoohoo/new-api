@@ -18,15 +18,21 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 /** One host-served endpoint a protocol claim binds. */
+export type HostProtocolSupport =
+  | 'stream'
+  | 'sync'
+  | 'background'
+  | 'compaction'
+
 export type HostProtocolEndpoint = {
   method: string
   path: string
   /**
-   * Whether this endpoint is the mode-bearing create call. `supports` gates the
-   * accepted request forms of the create endpoint only; retrieval of an already
-   * created resource is always available and never declared.
+   * Supports values displayed on this endpoint. `supports` gates accepted
+   * request forms and hookless capabilities; retrieval of an already created
+   * resource is always available and never declared.
    */
-  modeBearing?: boolean
+  supports?: readonly HostProtocolSupport[]
 }
 
 /**
@@ -38,11 +44,20 @@ export type HostProtocolEndpoint = {
  */
 export const HOST_PROTOCOL_ENDPOINTS: Record<string, HostProtocolEndpoint[]> = {
   openai_responses: [
-    { method: 'POST', path: '/v1/responses', modeBearing: true },
+    {
+      method: 'POST',
+      path: '/v1/responses',
+      supports: ['stream', 'sync', 'background'],
+    },
+    {
+      method: 'POST',
+      path: '/v1/responses/compact',
+      supports: ['compaction'],
+    },
     { method: 'GET', path: '/v1/responses/{response_id}' },
   ],
   openai_video: [
-    { method: 'POST', path: '/v1/videos', modeBearing: true },
+    { method: 'POST', path: '/v1/videos' },
     { method: 'GET', path: '/v1/videos/{task_id}' },
     { method: 'GET', path: '/v1/videos/{task_id}/content' },
   ],

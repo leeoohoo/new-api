@@ -112,8 +112,10 @@ function hasHailuoImage(req, hasInputReferenceFile) {
     trimmed(req && req.input_reference) ||
     trimmed(req && req.image) ||
     (Array.isArray(req && req.images) && req.images.length) ||
+    (Array.isArray(req && req.content) && h3HasVisualContent(req.content)) ||
     metadata.first_frame_image ||
     metadata.last_frame_image ||
+    (Array.isArray(metadata.content) && h3HasVisualContent(metadata.content)) ||
     metadata.subject_reference
   );
 }
@@ -245,14 +247,16 @@ function validateH3Content(items) {
 function h3Content(req) {
   const metadata = req.metadata || {};
   const prompt = trimmed(req.prompt);
-  if (metadata.content !== undefined && metadata.content !== null) {
-    if (!Array.isArray(metadata.content)) throw new Error("metadata.content must be an array");
-    const items = metadata.content;
+  const hasTopLevelContent = req.content !== undefined && req.content !== null;
+  const officialContent = hasTopLevelContent ? req.content : metadata.content;
+  if (officialContent !== undefined && officialContent !== null) {
+    if (!Array.isArray(officialContent)) throw new Error(hasTopLevelContent ? "content must be an array" : "metadata.content must be an array");
+    const items = officialContent;
     const hasText = items.some(function (item) {
       return item && item.type === "text" && trimmed(item.text);
     });
     if (hasText) return validateH3Content(items);
-    if (!prompt) throw new Error(H3_MODEL + " metadata.content requires a text item or a prompt");
+    if (!prompt) throw new Error(H3_MODEL + " content requires a text item or a prompt");
     return validateH3Content([{ type: "text", text: prompt }].concat(items));
   }
   const content = prompt ? [{ type: "text", text: prompt }] : [];

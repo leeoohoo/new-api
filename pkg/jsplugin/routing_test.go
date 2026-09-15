@@ -815,7 +815,7 @@ func TestRemovedEndpointsAndProtocolHooksAreValidatedAtCompileTime(t *testing.T)
 		}};`,
 	)
 	_, err = CompilePlugin(missingHook, Options{})
-	require.ErrorContains(t, err, `plugin bad-protocol protocol "openai_responses" must declare supports; replace the bare string with {name: "openai_responses", supports: [...]} choosing from "stream", "sync", "background"`)
+	require.ErrorContains(t, err, `plugin bad-protocol protocol "openai_responses" must declare supports; replace the bare string with {name: "openai_responses", supports: [...]} choosing from "stream", "sync", "background", "compaction"`)
 
 	for _, removedExport := range []string{"renderers", "renderError", "resolveRequest"} {
 		t.Run("removed export "+removedExport, func(t *testing.T) {

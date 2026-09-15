@@ -35,7 +35,9 @@ export const pluginProtocolClaimsSchema = z.array(
     z.object({
       name: nonemptyString,
       models: z.array(nonemptyString).optional(),
-      supports: z.array(z.enum(['stream', 'sync', 'background'])).optional(),
+      supports: z
+        .array(z.enum(['stream', 'sync', 'background', 'compaction']))
+        .optional(),
     }),
   ])
 )

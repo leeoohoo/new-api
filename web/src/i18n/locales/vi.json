@@ -4768,6 +4768,7 @@
     "Response Time": "Thời gian phản hồi",
     "Response time: {{duration}}": "Thời gian phản hồi: {{duration}}",
     "Response too large": "Phản hồi quá lớn",
+    "Responses compaction": "Nén Responses",
     "Responses API Version": "Phiên bản API Phản hồi",
     "Restore default pricing": "Khôi phục giá mặc định",
     "Restore defaults": "Khôi phục mặc định",

@@ -4768,6 +4768,7 @@
     "Response Time": "Время ответа",
     "Response time: {{duration}}": "Время ответа: {{duration}}",
     "Response too large": "Ответ слишком большой",
+    "Responses compaction": "Сжатие Responses",
     "Responses API Version": "Версия API ответов",
     "Restore default pricing": "Восстановить цены по умолчанию",
     "Restore defaults": "Сбросить к значениям по умолчанию",

@@ -26,7 +26,7 @@ export type TaskPluginProtocolClaim =
   | {
       name: string
       models?: string[]
-      supports?: ('stream' | 'sync' | 'background')[]
+      supports?: ('stream' | 'sync' | 'background' | 'compaction')[]
     }
 
 /**

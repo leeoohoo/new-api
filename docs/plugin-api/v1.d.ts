@@ -30,10 +30,10 @@ export type QueryIntent = {kind: "query"; taskIds: readonly string[]};
 export type TaskIntent = SubmitIntent | QueryIntent;
 export interface NativeRoute {method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"; path: string; type: "submit" | "query" | "dynamic"; action?: string; taskIdParam?: string; decode?: string; render: string; models?: readonly string[]}
 export type ProtocolName = "openai_responses" | "openai_video";
-export type ResponsesMode = "stream" | "sync" | "background";
+export type ResponsesSupport = "stream" | "sync" | "background" | "compaction";
 export type ProtocolClaim =
   | "openai_video"
-  | {name: "openai_responses"; supports: readonly ResponsesMode[]; models?: readonly string[]}
+  | {name: "openai_responses"; supports: readonly ResponsesSupport[]; models?: readonly string[]}
   | {name: "openai_video"; models?: readonly string[]};
 export type LocalizedText = string | ({ en: string } & Record<string, string>);
 export type UsageFieldSchema =

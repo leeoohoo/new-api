@@ -29,7 +29,7 @@ const inchoMeta = `export const meta = {
   apiVersion: 1, key: "incho", name: "Incho", version: "1.0.1",
   models: ["incho_music"],
   baseUrl: "https://open.yinchaoyongxian.com",
-  protocols: [{name: "openai_responses", supports: ["stream", "sync", "background"]}],
+  protocols: [{name: "openai_responses", supports: ["stream", "sync", "background", "compaction"]}],
   routes: [
     {method: "POST", path: "/incho/submit/:action", type: "submit", decode: "decodeSubmit"},
     {method: "GET", path: "/incho/fetch/:task_id", type: "query"},
@@ -61,7 +61,10 @@ test('reads the selected Incho models, protocols and both native routes without 
     state: 'value',
     origin: 'source',
     value: [
-      { name: 'openai_responses', supports: ['stream', 'sync', 'background'] },
+      {
+        name: 'openai_responses',
+        supports: ['stream', 'sync', 'background', 'compaction'],
+      },
     ],
   })
   expect(preview.fields.routes).toEqual({

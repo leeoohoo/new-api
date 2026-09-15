@@ -45,13 +45,13 @@ func TestProtocolSupportsLoadErrors(t *testing.T) {
 			name:      "bare string",
 			protocols: `["openai_responses"]`,
 			exports:   responsesDecodeBoth,
-			err:       `plugin acme protocol "openai_responses" must declare supports; replace the bare string with {name: "openai_responses", supports: [...]} choosing from "stream", "sync", "background"`,
+			err:       `plugin acme protocol "openai_responses" must declare supports; replace the bare string with {name: "openai_responses", supports: [...]} choosing from "stream", "sync", "background", "compaction"`,
 		},
 		{
 			name:      "object without supports",
 			protocols: `[{name: "openai_responses"}]`,
 			exports:   responsesDecodeBoth,
-			err:       `plugin acme protocol "openai_responses" must declare supports; add supports: [...] choosing from "stream", "sync", "background"`,
+			err:       `plugin acme protocol "openai_responses" must declare supports; add supports: [...] choosing from "stream", "sync", "background", "compaction"`,
 		},
 		{
 			name:      "supports sync but only renderEvents",
@@ -81,7 +81,7 @@ func TestProtocolSupportsLoadErrors(t *testing.T) {
 			name:      "empty supports",
 			protocols: `[{name: "openai_responses", supports: []}]`,
 			exports:   responsesDecodeBoth,
-			err:       `plugin acme protocol "openai_responses" supports must contain at least one of "stream", "sync", "background"`,
+			err:       `plugin acme protocol "openai_responses" supports must contain at least one of "stream", "sync", "background", "compaction"`,
 		},
 		{
 			name:      "duplicate supports",
@@ -142,12 +142,21 @@ func TestProtocolSupportsHappyPaths(t *testing.T) {
 			},
 		},
 		{
-			name:      "all modes normalize to table order",
+			name:      "all supports normalize to table order",
 			models:    `["model"]`,
-			protocols: `[{name: "openai_responses", supports: ["background", "stream", "sync"]}]`,
+			protocols: `[{name: "openai_responses", supports: ["compaction", "background", "stream", "sync"]}]`,
 			exports:   responsesDecodeBoth,
 			wantProtocols: []ProtocolClaim{
-				{Name: "openai_responses", Supports: []string{"stream", "sync", "background"}, objectForm: true},
+				{Name: "openai_responses", Supports: []string{"stream", "sync", "background", "compaction"}, objectForm: true},
+			},
+		},
+		{
+			name:      "compaction marker requires only decode",
+			models:    `["model"]`,
+			protocols: `[{name: "openai_responses", supports: ["compaction"]}]`,
+			exports:   responsesDecodeOnly,
+			wantProtocols: []ProtocolClaim{
+				{Name: "openai_responses", Supports: []string{"compaction"}, objectForm: true},
 			},
 		},
 		{
@@ -205,6 +214,7 @@ func TestMetaProtocolSupports(t *testing.T) {
 	assert.True(t, streamOnly.Meta.ProtocolSupports("openai_responses", "stream"))
 	assert.False(t, streamOnly.Meta.ProtocolSupports("openai_responses", "sync"))
 	assert.False(t, streamOnly.Meta.ProtocolSupports("openai_responses", "background"))
+	assert.False(t, streamOnly.Meta.ProtocolSupports("openai_responses", "compaction"))
 	assert.False(t, streamOnly.Meta.ProtocolSupports("openai_responses", "retrieve"))
 	assert.False(t, streamOnly.Meta.ProtocolSupports("openai_video", "stream"))
 	assert.False(t, streamOnly.Meta.ProtocolSupports("missing", "stream"))
@@ -216,11 +226,11 @@ func TestMetaProtocolSupports(t *testing.T) {
 
 func TestProtocolClaimMarshalEmitsSupportsInTableOrder(t *testing.T) {
 	plugin, err := compileProtocolPlugin(t, "acme", `["model"]`,
-		`[{name: "openai_responses", supports: ["background", "sync", "stream"]}]`, responsesDecodeBoth)
+		`[{name: "openai_responses", supports: ["compaction", "background", "sync", "stream"]}]`, responsesDecodeBoth)
 	require.NoError(t, err)
 	encoded, err := common.Marshal(plugin.Meta.Protocols[0])
 	require.NoError(t, err)
-	assert.Equal(t, `{"name":"openai_responses","supports":["stream","sync","background"]}`, string(encoded))
+	assert.Equal(t, `{"name":"openai_responses","supports":["stream","sync","background","compaction"]}`, string(encoded))
 }
 
 func compileProtocolPlugin(t *testing.T, key, models, protocols, exports string) (*LoadedPlugin, error) {

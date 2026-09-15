@@ -22,7 +22,10 @@ import { useTranslation } from 'react-i18next'
 import { CopyButton } from '@/components/copy-button'
 import { Badge } from '@/components/ui/badge'
 
-import { HOST_PROTOCOL_ENDPOINTS } from '../lib/host-protocols'
+import {
+  HOST_PROTOCOL_ENDPOINTS,
+  type HostProtocolSupport,
+} from '../lib/host-protocols'
 import type { TaskPluginMeta, TaskPluginRoute } from '../types'
 import { PluginModelList } from './plugin-model-list'
 
@@ -101,25 +104,48 @@ export function PluginEndpoints(props: {
         const supports = typeof claim === 'string' ? undefined : claim.supports
         const models = typeof claim === 'string' ? undefined : claim.models
         const endpoints = HOST_PROTOCOL_ENDPOINTS[name] ?? []
-        const modeLabels = {
+        const visibleEndpoints = endpoints.filter(
+          (endpoint) =>
+            !endpoint.supports?.length ||
+            supports?.some((support) => endpoint.supports?.includes(support))
+        )
+        const supportLabels = {
           stream: t('Streaming'),
           sync: t('Synchronous'),
           background: t('Background'),
+          compaction: t('Responses compaction'),
         }
-        const chips = supports?.map((mode) => (
+        const chipsFor = (endpointSupports?: readonly HostProtocolSupport[]) =>
+          supports
+            ?.filter((support) => endpointSupports?.includes(support))
+            .map((support) => (
+              <Badge
+                key={support}
+                variant='secondary'
+                className='font-mono font-normal'
+              >
+                <span>{support}</span>
+                <span className='font-sans'>{supportLabels[support]}</span>
+              </Badge>
+            ))
+        const undeclaredEndpointChips = supports?.map((support) => (
           <Badge
-            key={mode}
+            key={support}
             variant='secondary'
             className='font-mono font-normal'
           >
-            <span>{mode}</span>
-            <span className='font-sans'>{modeLabels[mode]}</span>
+            <span>{support}</span>
+            <span className='font-sans'>{supportLabels[support]}</span>
           </Badge>
         ))
-        // Chips belong on the create row, but a claim naming a protocol absent
+        // Chips belong on the rows for their advertised supports, but a claim naming a protocol absent
         // from the frozen table has no rows at all; keep the declared forms
         // visible on the group header rather than dropping them silently.
-        const hasCreateRow = endpoints.some((endpoint) => endpoint.modeBearing)
+        const hasSupportedRows = endpoints.some(
+          (endpoint) =>
+            endpoint.supports?.length &&
+            supports?.some((support) => endpoint.supports?.includes(support))
+        )
         return (
           <div key={name} className='bg-muted/30 space-y-1.5 rounded-md p-3'>
             <div className='flex flex-wrap items-center gap-x-2 gap-y-1'>
@@ -132,10 +158,10 @@ export function PluginEndpoints(props: {
                   collapsedLabel={t('Model scope')}
                 />
               ) : null}
-              {hasCreateRow ? null : chips}
+              {hasSupportedRows ? null : undeclaredEndpointChips}
             </div>
             <ul className='divide-y'>
-              {endpoints.map((endpoint) => (
+              {visibleEndpoints.map((endpoint) => (
                 <EndpointRow
                   key={`${endpoint.method} ${endpoint.path}`}
                   method={endpoint.method}
@@ -146,7 +172,7 @@ export function PluginEndpoints(props: {
                       ? t('Submit request')
                       : t('Retrieve result')}
                   </span>
-                  {endpoint.modeBearing ? chips : null}
+                  {chipsFor(endpoint.supports)}
                 </EndpointRow>
               ))}
             </ul>

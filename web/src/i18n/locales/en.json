@@ -4768,6 +4768,7 @@
     "Response Time": "Response Time",
     "Response time: {{duration}}": "Response time: {{duration}}",
     "Response too large": "Response too large",
+    "Responses compaction": "Responses compaction",
     "Responses API Version": "Responses API Version",
     "Restore default pricing": "Restore default pricing",
     "Restore defaults": "Restore defaults",

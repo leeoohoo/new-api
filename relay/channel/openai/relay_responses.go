@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -37,6 +38,7 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	}
 
 	responseBody = rewriteSGLangResponsesCreatedAt(info, responseBody, "created_at", responsesResponse.CreatedAt)
+	responseBody = filterResponsesImageGenerationTools(info, responseBody)
 
 	// 写入新的 response body
 	service.IOCopyBytesGracefully(c, resp, responseBody)
@@ -90,11 +92,110 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		if streamResponse.Response != nil {
 			data = string(rewriteSGLangResponsesCreatedAt(info, []byte(data), "response.created_at", streamResponse.Response.CreatedAt))
 		}
+		data = filterResponsesImageGenerationStreamData(info, streamResponse, data)
 		sendResponsesStreamData(c, streamResponse, data)
 		accumulator.Observe(&streamResponse)
 	})
 
 	return accumulator.Finish(), nil
+}
+
+func filterResponsesImageGenerationStreamData(info *relaycommon.RelayInfo, streamResponse dto.ResponsesStreamResponse, data string) string {
+	if !shouldFilterResponsesImageGenerationTools(info) {
+		return data
+	}
+	if streamResponse.Item != nil && streamResponse.Item.Type == dto.ResponsesOutputTypeImageGenerationCall {
+		return ""
+	}
+	if strings.Contains(streamResponse.Type, "image_generation_call") {
+		return ""
+	}
+	filtered := filterResponsesImageGenerationTools(info, []byte(data))
+	return string(filtered)
+}
+
+func filterResponsesImageGenerationTools(info *relaycommon.RelayInfo, payload []byte) []byte {
+	if !shouldFilterResponsesImageGenerationTools(info) || len(payload) == 0 {
+		return payload
+	}
+	filtered := filterResponsesImageGenerationArray(payload, "tools", isResponsesImageGenerationTool)
+	filtered = filterResponsesImageGenerationArray(filtered, "response.tools", isResponsesImageGenerationTool)
+	filtered = filterResponsesImageGenerationArray(filtered, "output", isResponsesImageGenerationOutput)
+	filtered = filterResponsesImageGenerationArray(filtered, "response.output", isResponsesImageGenerationOutput)
+	filtered = filterResponsesImageGenerationItem(filtered, "item")
+	filtered = filterResponsesImageGenerationItem(filtered, "response.item")
+	filtered = deleteJSONPathIfExists(filtered, "tool_usage.image_gen")
+	filtered = deleteJSONPathIfExists(filtered, "response.tool_usage.image_gen")
+	return filtered
+}
+
+func shouldFilterResponsesImageGenerationTools(info *relaycommon.RelayInfo) bool {
+	modelName := ""
+	if info != nil {
+		modelName = info.OriginModelName
+		if info.ChannelMeta != nil && info.ChannelMeta.UpstreamModelName != "" {
+			modelName = info.ChannelMeta.UpstreamModelName
+		}
+	}
+	modelName = strings.ToLower(strings.TrimSpace(modelName))
+	return modelName == "" || !strings.Contains(modelName, "gpt-image-")
+}
+
+func filterResponsesImageGenerationArray(payload []byte, path string, discard func(gjson.Result) bool) []byte {
+	array := gjson.GetBytes(payload, path)
+	if !array.IsArray() {
+		return payload
+	}
+	values := make([]any, 0)
+	changed := false
+	for _, item := range array.Array() {
+		if discard(item) {
+			changed = true
+			continue
+		}
+		values = append(values, item.Value())
+	}
+	if !changed {
+		return payload
+	}
+	patched, err := sjson.SetBytes(payload, path, values)
+	if err != nil {
+		return payload
+	}
+	return patched
+}
+
+func filterResponsesImageGenerationItem(payload []byte, path string) []byte {
+	item := gjson.GetBytes(payload, path)
+	if !item.Exists() || !isResponsesImageGenerationOutput(item) {
+		return payload
+	}
+	patched, err := sjson.DeleteBytes(payload, path)
+	if err != nil {
+		return payload
+	}
+	return patched
+}
+
+func deleteJSONPathIfExists(payload []byte, path string) []byte {
+	if !gjson.GetBytes(payload, path).Exists() {
+		return payload
+	}
+	patched, err := sjson.DeleteBytes(payload, path)
+	if err != nil {
+		return payload
+	}
+	return patched
+}
+
+func isResponsesImageGenerationTool(item gjson.Result) bool {
+	toolType := strings.TrimSpace(item.Get("type").String())
+	toolModel := strings.ToLower(strings.TrimSpace(item.Get("model").String()))
+	return toolType == dto.BuildInToolImageGeneration || strings.Contains(toolModel, "gpt-image-")
+}
+
+func isResponsesImageGenerationOutput(item gjson.Result) bool {
+	return strings.TrimSpace(item.Get("type").String()) == dto.ResponsesOutputTypeImageGenerationCall
 }
 
 func rewriteSGLangResponsesCreatedAt(info *relaycommon.RelayInfo, payload []byte, path string, createdAt dto.IntValue) []byte {

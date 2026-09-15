@@ -212,6 +212,10 @@ func ValidateMultipartDirect(c *gin.Context, info *RelayInfo) *dto.TaskError {
 	model = req.Model
 	size = req.Size
 	seconds, _ = strconv.Atoi(req.Seconds)
+	if strings.TrimSpace(prompt) == "" {
+		prompt = req.ContentPrompt()
+		req.Prompt = prompt
+	}
 	if seconds == 0 {
 		seconds = req.Duration
 	}
@@ -273,6 +277,7 @@ func isKnownTaskField(field string) bool {
 		"mode":            true,
 		"image":           true,
 		"images":          true,
+		"content":         true,
 		"size":            true,
 		"duration":        true,
 		"input_reference": true, // Sora 特有字段
@@ -293,6 +298,10 @@ func ValidateBasicTaskRequest(c *gin.Context, info *RelayInfo, action string) *d
 	// 为了metadata字段的兼容性，统一UnmarshalBodyReusable
 	if err := common.UnmarshalBodyReusable(c, &req); err != nil {
 		return createTaskError(err, "invalid_request", http.StatusBadRequest, true)
+	}
+
+	if strings.TrimSpace(req.Prompt) == "" {
+		req.Prompt = req.ContentPrompt()
 	}
 
 	if taskErr := validatePrompt(req.Prompt); taskErr != nil {

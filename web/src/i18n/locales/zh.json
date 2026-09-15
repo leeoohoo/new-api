@@ -4768,6 +4768,7 @@
     "Response Time": "响应时间",
     "Response time: {{duration}}": "响应时间：{{duration}}",
     "Response too large": "响应过大",
+    "Responses compaction": "Responses 压缩",
     "Responses API Version": "响应 API 版本",
     "Restore default pricing": "恢复默认定价",
     "Restore defaults": "恢复默认",

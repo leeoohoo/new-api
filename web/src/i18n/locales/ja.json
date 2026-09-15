@@ -4768,6 +4768,7 @@
     "Response Time": "応答時間",
     "Response time: {{duration}}": "応答時間: {{duration}}",
     "Response too large": "応答が大きすぎます",
+    "Responses compaction": "Responses 圧縮",
     "Responses API Version": "応答APIバージョン",
     "Restore default pricing": "既定の料金に戻す",
     "Restore defaults": "既定に戻す",

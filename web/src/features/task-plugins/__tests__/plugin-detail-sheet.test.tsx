@@ -120,12 +120,13 @@ describe('PluginDetailSheet metadata fields', () => {
 })
 
 describe('PluginDetailSheet host protocol endpoints', () => {
-  test('given an openai_responses claim, both the create and the retrieve endpoint are listed', async () => {
+  test('given an openai_responses claim, the supported create and retrieve endpoints are listed', async () => {
     renderSheet({
       protocols: [{ name: 'openai_responses', supports: ['stream'] }],
     })
 
     expect(await screen.findByText('/v1/responses')).toBeInTheDocument()
+    expect(screen.queryByText('/v1/responses/compact')).toBeNull()
     expect(screen.getByText('/v1/responses/{response_id}')).toBeInTheDocument()
     expect(endpointRow('/v1/responses').textContent).toContain('POST')
     expect(endpointRow('/v1/responses/{response_id}').textContent).toContain(
@@ -133,7 +134,7 @@ describe('PluginDetailSheet host protocol endpoints', () => {
     )
   })
 
-  test('given an object claim with all supports, the three mode chips sit on the create row', async () => {
+  test('given an object claim with response creation supports, the three mode chips sit on the create row', async () => {
     renderSheet({
       protocols: [
         {
@@ -149,6 +150,24 @@ describe('PluginDetailSheet host protocol endpoints', () => {
     expect(createRow).toContainElement(screen.getByText('stream'))
     expect(createRow).toContainElement(screen.getByText('sync'))
     expect(createRow).toContainElement(screen.getByText('background'))
+  })
+
+  test('given an object claim with compaction support, the compaction chip sits on the compact row', async () => {
+    renderSheet({
+      protocols: [
+        {
+          name: 'openai_responses',
+          supports: ['stream', 'compaction'],
+        },
+      ],
+    })
+
+    await screen.findByText('/v1/responses/compact')
+
+    const createRow = endpointRow('/v1/responses')
+    const compactRow = endpointRow('/v1/responses/compact')
+    expect(createRow).toContainElement(screen.getByText('stream'))
+    expect(compactRow).toContainElement(screen.getByText('compaction'))
   })
 
   test('given an object claim with all supports, the retrieve row carries no mode chips', async () => {

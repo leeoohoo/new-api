@@ -109,6 +109,75 @@ func TestOaiResponsesHandlerDeclaredToolsWithoutOutputCountZero(t *testing.T) {
 	assert.Equal(t, 0, info.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolFileSearch].CallCount)
 }
 
+func TestOaiResponsesHandlerFiltersImageGenerationToolsForNonImageModel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	body := []byte(`{
+		"model":"gpt-5.1",
+		"tools":[
+			{"type":"web_search_preview"},
+			{"type":"image_generation","model":"gpt-image-1"}
+		],
+		"tool_usage":{"image_gen":{"count":1},"web_search":{"count":1}},
+		"output":[
+			{"type":"message","role":"assistant"},
+			{"type":"image_generation_call","id":"img_1","status":"completed","result":"base64-a"}
+		],
+		"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}
+	}`)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+	info := &relaycommon.RelayInfo{OriginModelName: "gpt-5.1"}
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(bytes.NewReader(body)),
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+	}
+
+	_, apiErr := OaiResponsesHandler(c, info, resp)
+	require.Nil(t, apiErr)
+	response := w.Body.String()
+	assert.Contains(t, response, `"web_search_preview"`)
+	assert.NotContains(t, response, `"image_generation"`)
+	assert.NotContains(t, response, `"gpt-image-1"`)
+	assert.NotContains(t, response, `"image_gen"`)
+	assert.NotContains(t, response, `"image_generation_call"`)
+}
+
+func TestOaiResponsesHandlerKeepsImageGenerationToolsForImageModel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	body := []byte(`{
+		"model":"gpt-image-1",
+		"tools":[{"type":"image_generation","model":"gpt-image-1"}],
+		"tool_usage":{"image_gen":{"count":1}},
+		"output":[{"type":"image_generation_call","id":"img_1","status":"completed","result":"base64-a"}],
+		"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}
+	}`)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+	info := &relaycommon.RelayInfo{OriginModelName: "gpt-image-1"}
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(bytes.NewReader(body)),
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+	}
+
+	_, apiErr := OaiResponsesHandler(c, info, resp)
+	require.Nil(t, apiErr)
+	response := w.Body.String()
+	assert.Contains(t, response, `"image_generation"`)
+	assert.Contains(t, response, `"gpt-image-1"`)
+	assert.Contains(t, response, `"image_gen"`)
+	assert.Contains(t, response, `"image_generation_call"`)
+}
+
 func TestOaiResponsesHandlerCountsCompletedImageGenerationOutputs(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -264,6 +333,48 @@ func TestOaiResponsesStreamHandlerDoesNotCountPartialImageEvent(t *testing.T) {
 	)
 
 	assert.Equal(t, 0, info.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolImageGeneration].CallCount)
+}
+
+func TestOaiResponsesStreamHandlerFiltersImageGenerationEventsForNonImageModel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	oldTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() {
+		constant.StreamingTimeout = oldTimeout
+	})
+
+	item := `{"type":"image_generation_call","id":"img_1","call_id":"call_1","status":"completed","result":"base64-a"}`
+	var body strings.Builder
+	body.WriteString(`data: {"type":"response.output_item.done","output_index":0,"item":` + item + `}`)
+	body.WriteString("\n\n")
+	body.WriteString(`data: {"type":"response.completed","response":{"status":"completed","tools":[{"type":"image_generation","model":"gpt-image-1"}],"tool_usage":{"image_gen":{"count":1}},"output":[` + item + `],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}`)
+	body.WriteString("\n\n")
+	body.WriteString("data: [DONE]\n\n")
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Set(common.RequestIdKey, "responses-image-filter-test")
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "gpt-5.1",
+		DisablePing:     true,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: "gpt-5.1",
+		},
+	}
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(body.String())),
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+	}
+
+	_, apiErr := OaiResponsesStreamHandler(c, info, resp)
+	require.Nil(t, apiErr)
+	response := w.Body.String()
+	assert.NotContains(t, response, `"image_generation"`)
+	assert.NotContains(t, response, `"gpt-image-1"`)
+	assert.NotContains(t, response, `"image_gen"`)
+	assert.NotContains(t, response, `"image_generation_call"`)
 }
 
 func TestOaiResponsesHandlerRewritesSGLangCreatedAtToInt(t *testing.T) {

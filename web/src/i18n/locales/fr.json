@@ -4768,6 +4768,7 @@
     "Response Time": "Temps de réponse",
     "Response time: {{duration}}": "Temps de réponse : {{duration}}",
     "Response too large": "Réponse trop volumineuse",
+    "Responses compaction": "Compactage Responses",
     "Responses API Version": "Version de l'API des réponses",
     "Restore default pricing": "Rétablir les tarifs par défaut",
     "Restore defaults": "Restaurer les paramètres par défaut",

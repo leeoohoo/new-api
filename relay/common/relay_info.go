@@ -981,6 +981,7 @@ type TaskSubmitReq struct {
 	Mode           string         `json:"mode,omitempty"`
 	Image          string         `json:"image,omitempty"`
 	Images         []string       `json:"images,omitempty"`
+	Content        []any          `json:"content,omitempty"`
 	Size           string         `json:"size,omitempty"`
 	Duration       int            `json:"duration,omitempty"`
 	Seconds        string         `json:"seconds,omitempty"`
@@ -989,11 +990,52 @@ type TaskSubmitReq struct {
 }
 
 func (t *TaskSubmitReq) GetPrompt() string {
+	if strings.TrimSpace(t.Prompt) != "" {
+		return t.Prompt
+	}
+	return t.ContentPrompt()
+}
+
+func (t *TaskSubmitReq) ContentPrompt() string {
+	return taskContentPrompt(t.Content)
+}
+
+func taskContentPrompt(content []any) string {
+	parts := make([]string, 0)
+	for _, raw := range content {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(fmt.Sprint(item["type"])), "text") {
+			if text := strings.TrimSpace(fmt.Sprint(item["text"])); text != "" {
+				parts = append(parts, text)
+			}
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+func taskContentHasVisual(content []any) bool {
+	for _, raw := range content {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		switch strings.TrimSpace(fmt.Sprint(item["type"])) {
+		case "image_url", "video_url":
+			return true
+		}
+	}
+	return false
+}
+
+func (t *TaskSubmitReq) RawPrompt() string {
 	return t.Prompt
 }
 
 func (t *TaskSubmitReq) HasImage() bool {
-	return len(t.Images) > 0
+	return len(t.Images) > 0 || taskContentHasVisual(t.Content)
 }
 
 func (t *TaskSubmitReq) UnmarshalJSON(data []byte) error {

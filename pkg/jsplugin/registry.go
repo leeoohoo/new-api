@@ -130,11 +130,11 @@ func (m Meta) UsageForModel(model string) (map[string]UsageFieldSchema, []UsageE
 	return m.UsageSchema, m.UsageExamples
 }
 
-// ProtocolSupports reports whether the named protocol claim includes mode.
-func (m Meta) ProtocolSupports(protocol, mode string) bool {
+// ProtocolSupports reports whether the named protocol claim includes support.
+func (m Meta) ProtocolSupports(protocol, support string) bool {
 	for _, claim := range m.Protocols {
 		if claim.Name == protocol {
-			return slices.Contains(claim.Supports, mode)
+			return slices.Contains(claim.Supports, support)
 		}
 	}
 	return false
@@ -1311,12 +1311,13 @@ func normalizeV1Meta(meta *Meta) error {
 		claim := &meta.Protocols[index]
 		definition, known := HostProtocol(claim.Name)
 		modes := definition.DefinedModes()
-		if len(modes) > 0 {
+		supportNames := definition.DefinedSupports()
+		if len(supportNames) > 0 {
 			modeNames := make([]string, len(modes))
 			for modeIndex, mode := range modes {
 				modeNames[modeIndex] = mode.Name
 			}
-			choosingFrom := quotedJoin(modeNames, ", ")
+			choosingFrom := quotedJoin(supportNames, ", ")
 			if claim.Supports == nil {
 				if claim.objectForm {
 					return fmt.Errorf("plugin %s protocol %q must declare supports; add supports: [...] choosing from %s", meta.Key, claim.Name, choosingFrom)
@@ -1332,11 +1333,11 @@ func normalizeV1Meta(meta *Meta) error {
 					return fmt.Errorf("plugin %s protocol %q supports must be unique", meta.Key, claim.Name)
 				}
 				seenSupports[support] = struct{}{}
-				if !slices.Contains(modeNames, support) {
+				if !slices.Contains(supportNames, support) {
 					if support == "retrieve" {
 						return fmt.Errorf("plugin %s protocol %q has no mode %q; retrieval of a created response is always available and is never declared", meta.Key, claim.Name, support)
 					}
-					return fmt.Errorf("plugin %s protocol %q has no mode %q", meta.Key, claim.Name, support)
+					return fmt.Errorf("plugin %s protocol %q has no support %q", meta.Key, claim.Name, support)
 				}
 			}
 			claim.Supports = orderProtocolSupports(claim.Name, claim.Supports)

@@ -37,8 +37,8 @@ type Route struct {
 
 // ProtocolClaim is one entry of meta.protocols. Models narrows the protocol's
 // endpoint bindings to a subset of meta.models; empty binds every model.
-// Supports names the request forms a mode-bearing protocol accepts; decode
-// and normalize rewrite it into host-table order.
+// Supports names the request forms and hookless protocol capabilities a
+// protocol accepts; decode and normalize rewrite it into host-table order.
 type ProtocolClaim struct {
 	Name       string   `json:"name"`
 	Models     []string `json:"models,omitempty"`
@@ -74,12 +74,13 @@ type HostProtocolOperation struct {
 }
 
 type HostProtocolDefinition struct {
-	Name       string
-	Operations []HostProtocolOperation
+	Name         string
+	Operations   []HostProtocolOperation
+	Capabilities []string
 }
 
 var hostProtocols = []HostProtocolDefinition{
-	{Name: "openai_responses", Operations: []HostProtocolOperation{
+	{Name: "openai_responses", Capabilities: []string{"compaction"}, Operations: []HostProtocolOperation{
 		{Name: "create", Methods: []string{http.MethodPost}, Path: "/v1/responses", BodyKinds: []BodyKind{BodyJSON}, ModelField: "model", RequiredProtocolMembers: []string{"decodeRequest"}, Modes: []ProtocolMode{{Name: "stream", Hook: "renderEvents"}, {Name: "sync", Hook: "renderFinal"}, {Name: "background", Hook: "renderFinal"}}},
 		{Name: "retrieve", Methods: []string{http.MethodGet}, Path: "/v1/responses/:response_id", BodyKinds: []BodyKind{BodyNone}},
 	}},
@@ -103,6 +104,7 @@ func HostProtocols() []HostProtocolDefinition {
 	definitions := make([]HostProtocolDefinition, len(hostProtocols))
 	for index, definition := range hostProtocols {
 		definitions[index] = definition
+		definitions[index].Capabilities = append([]string(nil), definition.Capabilities...)
 		definitions[index].Operations = append([]HostProtocolOperation(nil), definition.Operations...)
 		for operationIndex := range definitions[index].Operations {
 			operation := &definitions[index].Operations[operationIndex]
@@ -116,7 +118,8 @@ func HostProtocols() []HostProtocolDefinition {
 	return definitions
 }
 
-// DefinedModes returns each distinct mode on the protocol in host-table order.
+// DefinedModes returns each distinct hook-bearing mode on the protocol in
+// host-table order.
 func (d HostProtocolDefinition) DefinedModes() []ProtocolMode {
 	seen := make(map[string]struct{})
 	modes := make([]ProtocolMode, 0)
@@ -132,6 +135,29 @@ func (d HostProtocolDefinition) DefinedModes() []ProtocolMode {
 	return modes
 }
 
+// DefinedSupports returns each distinct value accepted in a protocol claim's
+// supports list: hook-bearing request forms first, followed by hookless
+// protocol capabilities.
+func (d HostProtocolDefinition) DefinedSupports() []string {
+	seen := make(map[string]struct{})
+	supports := make([]string, 0)
+	for _, mode := range d.DefinedModes() {
+		if _, exists := seen[mode.Name]; exists {
+			continue
+		}
+		seen[mode.Name] = struct{}{}
+		supports = append(supports, mode.Name)
+	}
+	for _, capability := range d.Capabilities {
+		if _, exists := seen[capability]; exists {
+			continue
+		}
+		seen[capability] = struct{}{}
+		supports = append(supports, capability)
+	}
+	return supports
+}
+
 func orderProtocolSupports(protocol string, supports []string) []string {
 	if len(supports) == 0 {
 		return supports
@@ -141,8 +167,8 @@ func orderProtocolSupports(protocol string, supports []string) []string {
 		return supports
 	}
 	rank := make(map[string]int)
-	for index, mode := range definition.DefinedModes() {
-		rank[mode.Name] = index
+	for index, support := range definition.DefinedSupports() {
+		rank[support] = index
 	}
 	ordered := append([]string(nil), supports...)
 	slices.SortStableFunc(ordered, func(left, right string) int {
