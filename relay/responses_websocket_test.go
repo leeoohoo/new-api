@@ -424,7 +424,7 @@ func TestResponsesWSShutdownInterruptsBusyWriter(t *testing.T) {
 	assert.Nil(t, s.getTarget())
 }
 
-func TestResponsesWSPassthroughPreservesRawPricingParameters(t *testing.T) {
+func TestResponsesWSOpenAIInboundGatewayFiltersRawProviderParameters(t *testing.T) {
 	create, _, err := normalizeResponsesWSCreateEvent([]byte(`{"type":"response.create","generate":false,"response":{"model":"gpt-5.1","input":"hi","vendor":{"tier":"premium"},"stream":true}}`))
 	require.NoError(t, err)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
@@ -436,7 +436,7 @@ func TestResponsesWSPassthroughPreservesRawPricingParameters(t *testing.T) {
 	info := relaycommon.GenRelayInfoResponses(c, &create.Request)
 	payload, apiErr := buildResponsesWSCreatePayload(c, info, create.Request, create.Generate)
 	require.Nil(t, apiErr)
-	assert.JSONEq(t, `{"type":"response.create","generate":false,"model":"gpt-5.1","input":"hi","vendor":{"tier":"premium"}}`, string(payload))
+	assert.JSONEq(t, `{"type":"response.create","generate":false,"model":"gpt-5.1","input":"hi"}`, string(payload))
 	storage, err := common.GetBodyStorage(c)
 	require.NoError(t, err)
 	require.NoError(t, storage.Close())
