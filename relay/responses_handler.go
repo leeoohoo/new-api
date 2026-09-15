@@ -46,6 +46,15 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		)
 	}
 
+	if compactReq, ok := info.Request.(*dto.OpenAIResponsesCompactionRequest); ok && shouldEmulateResponsesCompaction(info) {
+		usage, newAPIError := emulateResponsesCompaction(c, info, compactReq)
+		if newAPIError != nil {
+			return newAPIError
+		}
+		consumeResponsesCompactionQuota(c, info, usage)
+		return nil
+	}
+
 	adaptor, requestBody, closer, apiErr := PrepareResponsesRequest(c, info, responsesReq)
 	if apiErr != nil {
 		return apiErr
@@ -80,23 +89,30 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 
 	usageDto := usage.(*dto.Usage)
 	if info.RelayMode == relayconstant.RelayModeResponsesCompact {
-		originModelName := info.OriginModelName
-		originPriceData := info.PriceData
-
-		_, err := helper.ModelPriceHelper(c, info, info.GetEstimatePromptTokens(), &types.TokenCountMeta{})
-		if err != nil {
-			info.OriginModelName = originModelName
-			info.PriceData = originPriceData
-			return types.NewError(err, types.ErrorCodeModelPriceError, types.ErrOptionWithSkipRetry(), types.ErrOptionWithStatusCode(http.StatusBadRequest))
+		if apiErr := consumeResponsesCompactionQuota(c, info, usageDto); apiErr != nil {
+			return apiErr
 		}
-		service.PostTextConsumeQuota(c, info, usageDto, nil)
-
-		info.OriginModelName = originModelName
-		info.PriceData = originPriceData
 		return nil
 	}
 
 	ConsumeResponsesQuota(c, info, usageDto)
+	return nil
+}
+
+func consumeResponsesCompactionQuota(c *gin.Context, info *relaycommon.RelayInfo, usage *dto.Usage) *types.NewAPIError {
+	originModelName := info.OriginModelName
+	originPriceData := info.PriceData
+
+	_, err := helper.ModelPriceHelper(c, info, info.GetEstimatePromptTokens(), &types.TokenCountMeta{})
+	if err != nil {
+		info.OriginModelName = originModelName
+		info.PriceData = originPriceData
+		return types.NewError(err, types.ErrorCodeModelPriceError, types.ErrOptionWithSkipRetry(), types.ErrOptionWithStatusCode(http.StatusBadRequest))
+	}
+	service.PostTextConsumeQuota(c, info, usage, nil)
+
+	info.OriginModelName = originModelName
+	info.PriceData = originPriceData
 	return nil
 }
 
