@@ -555,3 +555,57 @@ func TestHailuoH3PassesOpenAIVideoDecode(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, float64(12), requestBody["duration"])
 }
+
+func TestHailuoH3OpenAIVideoInputReferenceObject(t *testing.T) {
+	plugin := loadHailuoPlugin(t)
+	frameURL := "https://cdn.example/first.png"
+	value, err := plugin.Engine.CallPath(t.Context(), "protocols", []string{"openai_video", "decodeRequest"},
+		map[string]any{
+			"body": map[string]any{"kind": "json", "value": map[string]any{
+				"model":           "MiniMax-H3",
+				"prompt":          "p",
+				"input_reference": map[string]any{"image_url": frameURL},
+				"seconds":         8,
+				"size":            "1280x720",
+			}},
+			"model":         "MiniMax-H3",
+			"upstreamModel": "MiniMax-H3",
+		})
+	require.NoError(t, err)
+	encoded, err := common.Marshal(value)
+	require.NoError(t, err)
+	var intent map[string]any
+	require.NoError(t, common.Unmarshal(encoded, &intent))
+	requestBody, ok := intent["requestBody"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, frameURL, requestBody["input_reference"])
+
+	descriptor := callHailuoHook(t, plugin, "buildSubmitRequest", map[string]any{
+		"baseUrl":       "https://api.minimax.example",
+		"apiKey":        "test-key",
+		"requestBody":   requestBody,
+		"upstreamModel": "MiniMax-H3",
+	})
+	body, ok := descriptor["body"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, float64(8), body["duration"])
+	assert.Equal(t, "768P", body["resolution"])
+	content, ok := body["content"].([]any)
+	require.True(t, ok)
+	assert.Contains(t, content, map[string]any{"type": "image_url", "role": "first_frame", "image_url": map[string]any{"url": frameURL}})
+}
+
+func TestHailuoH3OpenAIVideoFileIDReferenceExplainsUnsupportedProvider(t *testing.T) {
+	plugin := loadHailuoPlugin(t)
+	_, err := plugin.Engine.CallPath(t.Context(), "protocols", []string{"openai_video", "decodeRequest"},
+		map[string]any{
+			"body": map[string]any{"kind": "json", "value": map[string]any{
+				"model":           "MiniMax-H3",
+				"prompt":          "p",
+				"input_reference": map[string]any{"file_id": "file_123"},
+			}},
+			"model":         "MiniMax-H3",
+			"upstreamModel": "MiniMax-H3",
+		})
+	require.ErrorContains(t, err, "input_reference.file_id is not supported")
+}

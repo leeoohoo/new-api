@@ -6,12 +6,12 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/types"
 )
 
-// shouldNormalizeOpenAIInbound reports whether an ordinary LLM request should
+// shouldNormalizeOpenAITextInbound reports whether an ordinary LLM request should
 // pass through NewAPI's OpenAI-compatible normalization/conversion pipeline.
-// Video, image, audio, embedding and task endpoints keep their specialized
-// handlers. This keeps downstream clients on OpenAI wire formats while still
-// allowing the selected channel adaptor to translate to the provider protocol.
-func shouldNormalizeOpenAIInbound(info *relaycommon.RelayInfo) bool {
+// Video, image, audio, embedding and task endpoints keep their own specialized
+// handlers; each handler is still responsible for keeping its client-facing
+// surface OpenAI-compatible and translating only at the selected adaptor.
+func shouldNormalizeOpenAITextInbound(info *relaycommon.RelayInfo) bool {
 	if info == nil {
 		return false
 	}
@@ -31,9 +31,26 @@ func shouldNormalizeOpenAIInbound(info *relaycommon.RelayInfo) bool {
 	}
 }
 
-func shouldUseVerbatimOpenAIInboundBody(info *relaycommon.RelayInfo, globalPassThrough bool) bool {
-	if shouldNormalizeOpenAIInbound(info) {
+// shouldNormalizeOpenAIImageInbound reports whether an Images API request
+// should use the image adaptor pipeline. That keeps clients on OpenAI's Images
+// wire format even when a global or channel pass-through switch is enabled.
+// Multipart image edits are still OpenAI-format requests; the OpenAI adaptor
+// preserves them by re-serializing the official form fields and files.
+func shouldNormalizeOpenAIImageInbound(info *relaycommon.RelayInfo) bool {
+	if info == nil || info.RelayFormat != types.RelayFormatOpenAIImage {
 		return false
 	}
-	return globalPassThrough || (info != nil && info.ChannelSetting.PassThroughBodyEnabled)
+	switch info.RelayMode {
+	case relayconstant.RelayModeImagesGenerations, relayconstant.RelayModeImagesEdits:
+		return true
+	default:
+		return false
+	}
+}
+
+func shouldUseVerbatimOpenAIInboundBody(info *relaycommon.RelayInfo, globalPassThrough bool) bool {
+	if shouldNormalizeOpenAITextInbound(info) || shouldNormalizeOpenAIImageInbound(info) {
+		return false
+	}
+	return globalPassThrough || (info != nil && info.ChannelMeta != nil && info.ChannelSetting.PassThroughBodyEnabled)
 }

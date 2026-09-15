@@ -53,7 +53,7 @@ func TestImageRequestReservesFinalQuantityBeforeUpstream(t *testing.T) {
 		{name: "Ali empty parameters", body: `{"model":"z-image","n":2,"parameters":{}}`, count: 2},
 		{name: "legacy channel quantity override", body: `{"model":"z-image","n":1}`, override: 4, count: 4},
 		{name: "expression channel quantity override", body: `{"model":"z-image","n":1}`, override: 4, count: 4, tiered: true},
-		{name: "pass-through quantity", body: `{"model":"z-image","n":2,"parameters":{}}`, count: 2, passThrough: true},
+		{name: "pass-through quantity", body: `{"model":"z-image","n":2,"parameters":{},"vendor_private":true}`, count: 2, passThrough: true},
 		{name: "zero override rejected", body: `{"model":"z-image","n":1}`, override: 0, status: http.StatusBadRequest},
 		{name: "oversized override rejected", body: `{"model":"z-image","n":1}`, override: 129, status: http.StatusBadRequest},
 		{name: "insufficient reservation blocks upstream", body: `{"model":"z-image","n":1}`, override: 4, count: 4, insufficient: true, status: http.StatusForbidden},
@@ -91,7 +91,7 @@ func TestImageRequestReservesFinalQuantityBeforeUpstream(t *testing.T) {
 				reservation.limit = reservation.held
 			}
 			info := &relaycommon.RelayInfo{Request: request, OriginModelName: "z-image", RelayMode: relayconstant.RelayModeImagesGenerations,
-				RequestURLPath: c.Request.URL.Path, Billing: reservation,
+				RequestURLPath: c.Request.URL.Path, RelayFormat: types.RelayFormatOpenAIImage, Billing: reservation,
 				PriceData: hosttypes.PriceData{UsePrice: true, ModelPrice: 0.04, GroupRatioInfo: hosttypes.GroupRatioInfo{GroupRatio: 1}},
 			}
 			if tc.tiered {
@@ -121,6 +121,9 @@ func TestImageRequestReservesFinalQuantityBeforeUpstream(t *testing.T) {
 				path = "n"
 			}
 			assert.Equal(t, int64(tc.count), gjson.GetBytes(body, path).Int())
+			if tc.passThrough {
+				assert.False(t, gjson.GetBytes(body, "vendor_private").Exists(), "OpenAI Images inbound gateway must not leak downstream vendor fields through pass-through")
+			}
 			assert.Equal(t, tc.count*20000, info.PriceData.QuotaToPreConsume)
 			assert.GreaterOrEqual(t, reservation.held, info.PriceData.QuotaToPreConsume)
 			assert.Nil(t, info.BillingImageCount)

@@ -154,7 +154,9 @@ function h3Resolution(req) {
   if (!raw) return "768P";
   const value = raw.toUpperCase();
   if (value.includes("2K")) return "2K";
+  if (value.includes("1792") || value.includes("1024")) return "2K";
   if (value.includes("768")) return "768P";
+  if (value.includes("1280") || value.includes("720")) return "768P";
   throw new Error(H3_MODEL + " resolution must be 768P or 2K");
 }
 
@@ -162,6 +164,21 @@ function h3MediaItem(type, url, role) {
   const item = { type: type, role: role };
   item[type] = { url: url };
   return item;
+}
+
+function openAIInputReferenceImageURL(value) {
+  if (value === undefined || value === null || value === "") return "";
+  if (typeof value === "string") return trimmed(value);
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("input_reference must be a string or an object");
+  if (value.image_url !== undefined && value.image_url !== null) {
+    if (typeof value.image_url === "string") return trimmed(value.image_url);
+    if (typeof value.image_url === "object" && !Array.isArray(value.image_url)) return trimmed(value.image_url.url);
+    throw new Error("input_reference.image_url must be a string");
+  }
+  if (value.file_id !== undefined && value.file_id !== null) {
+    throw new Error("input_reference.file_id is not supported by Hailuo; use input_reference.image_url or multipart input_reference");
+  }
+  return "";
 }
 
 // Accepts a single value or an array; file placeholders stay objects and are
@@ -586,7 +603,7 @@ export const protocols = {
       const input = responsesInput(req);
       const prompt = input.prompt || trimmed(req.prompt);
       const images = [];
-      for (const image of [req.image, req.input_reference].concat(req.images || [], input.images)) {
+      for (const image of [req.image, openAIInputReferenceImageURL(req.input_reference)].concat(req.images || [], input.images)) {
         if (trimmed(image) && !images.includes(trimmed(image))) images.push(trimmed(image));
       }
       if (!prompt && images.length === 0) throw new Error("input is required");
@@ -697,7 +714,9 @@ protocols.openai_video = {
         first_frame_image: { __fileRef: "request_file:input_reference", encoding: "dataUrl", maxBytes: 20971520 },
       });
     } else {
-      const image = trimmed(req.input_reference || req.image);
+      const inputReferenceImage = openAIInputReferenceImageURL(req.input_reference);
+      if (inputReferenceImage) req.input_reference = inputReferenceImage;
+      const image = inputReferenceImage || trimmed(req.image);
       if (image) {
         req.metadata = Object.assign({}, req.metadata || {});
         if (!req.metadata.first_frame_image) req.metadata.first_frame_image = image;
